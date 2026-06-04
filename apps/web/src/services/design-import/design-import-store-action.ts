@@ -232,16 +232,11 @@ export function importPenDocument(
   // `doc.children.map(...)`; if Mira emitted only `pages` (no top-level
   // `children`), that crashes with "Cannot read properties of undefined
   // (reading 'map')". Pad it so the store gets a stable shape.
-  //
-  // Then DETACH every `ref` so every screen has its own editable copy
-  // of the component — refs make text un-editable in-place, and for
-  // wireframe iteration the user wants click-to-edit on every label.
   const safeDoc: PenDocument = {
     ...doc,
     children: Array.isArray(doc.children) ? doc.children : [],
   };
-  const detached = detachRefsInDocument(safeDoc);
-  applyExternalDocument(detached);
+  applyExternalDocument(safeDoc);
 
   // Report ids visible on the active page so callers can correlate the
   // load with what the user actually sees.
