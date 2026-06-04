@@ -16,6 +16,11 @@ import { createNodeActions } from './document-store-node-actions';
 import { createComponentActions } from './document-store-component-actions';
 import { createVariableActions } from './document-store-variable-actions';
 import { createPageActions } from './document-store-pages';
+import { importDesign as importDesignAction } from '@/services/design-import/design-import-store-action';
+import type {
+  DesignImportDocument,
+  DesignImportResult,
+} from '@/services/design-import/design-import-types';
 import {
   isElectron,
   supportsFileSystemAccess,
@@ -76,6 +81,14 @@ interface DocumentStoreState {
   reorderPage: (pageId: string, direction: 'left' | 'right') => void;
   duplicatePage: (pageId: string) => string | null;
 
+  /**
+   * Insert author-friendly JSON nodes onto the active page. The whole
+   * import is wrapped in a single history batch so undo reverses it in
+   * one step. Returns the inserted root node ids plus any warnings raised
+   * during mapping (unknown keys, dropped fields).
+   */
+  importDesign: (doc: DesignImportDocument) => DesignImportResult;
+
   applyExternalDocument: (doc: PenDocument) => void;
   applyHistoryState: (doc: PenDocument) => void;
   loadDocument: (
@@ -126,6 +139,10 @@ export const useDocumentStore = create<DocumentStoreState>((set, get) => ({
 
   // --- Page management (extracted to document-store-pages.ts) ---
   ...createPageActions(set, get),
+
+  // --- Design import (author-friendly JSON → PenNodes) ---
+
+  importDesign: (doc) => importDesignAction(set, get, doc),
 
   // --- Lifecycle actions (remain inline — small) ---
 

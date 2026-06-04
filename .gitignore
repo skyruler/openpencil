@@ -25,3 +25,4 @@ dist-electron/
 .omx
 .worktrees/
 .omx/
+smoke-figma.ts

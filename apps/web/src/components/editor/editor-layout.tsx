@@ -17,6 +17,7 @@ import FigmaImportDialog from '@/components/shared/figma-import-dialog';
 import UnsavedChangesDialog from '@/components/shared/unsaved-changes-dialog';
 import type { UnsavedResult } from '@/components/shared/unsaved-changes-dialog';
 import UpdateReadyBanner from './update-ready-banner';
+import ImportDevPanel from './import-dev-panel';
 import { useAIStore } from '@/stores/ai-store';
 import { useCanvasStore } from '@/stores/canvas-store';
 import { useGitStore } from '@/stores/git-store';
@@ -231,8 +232,9 @@ export default function EditorLayout() {
 
               {/* Bottom bar: minimized AI (left) + zoom controls (right) */}
               <div className="absolute bottom-2 left-2 right-2 z-10 flex items-center justify-between pointer-events-none">
-                <div className="pointer-events-auto">
+                <div className="pointer-events-auto flex items-center gap-2">
                   <AIChatMinimizedBar />
+                  <ImportDevPanel />
                 </div>
                 <div className="pointer-events-auto">
                   <StatusBar />
