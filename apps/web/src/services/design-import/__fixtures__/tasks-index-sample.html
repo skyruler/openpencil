@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tasks Index — Sample</title>
+<script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+<!-- Wireframe bar (sticky) — should be filtered out -->
+<div class="bg-gray-800 text-white px-8 py-3 flex items-center justify-between sticky top-0 z-50">
+  <div class="flex items-center gap-6">
+    <span class="text-xs font-semibold uppercase text-gray-300">MicroProject — Wireframes</span>
+    <span class="text-xs text-gray-500">by Mira</span>
+  </div>
+</div>
+
+<!-- Annotation legend (sticky) — should be filtered out -->
+<div class="bg-gray-50 border-b border-gray-200 px-8 py-2 flex items-center gap-3 sticky top-[44px] z-40">
+  <span class="text-xs font-semibold text-gray-500">Annotations:</span>
+  <span class="text-xs text-gray-600">Structure</span>
+</div>
+
+<!-- APP SHELL — keep this -->
+<div class="flex justify-center px-8 py-10 bg-gray-100">
+  <div class="bg-white rounded-2xl border border-gray-200 flex" style="width:1280px;height:820px;">
+
+    <!-- SIDEBAR -->
+    <aside class="flex flex-col border-r border-gray-200 bg-gray-50" style="width:240px;">
+
+      <div class="px-4 flex items-center border-b border-gray-100" style="height:56px;">
+        <div class="flex items-center gap-2">
+          <div class="w-7 h-7 rounded-xl bg-gray-200"></div>
+          <div>
+            <div class="text-sm font-semibold text-gray-900">MicroProject</div>
+            <div class="text-xs text-gray-400">Personal workspace</div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="flex-1 px-2 py-3" aria-label="Main navigation">
+        <a href="#" class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-500">
+          <span>Projects</span>
+        </a>
+        <a href="#" aria-current="page" class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-900">
+          <span>Tasks</span>
+          <span class="ml-auto text-xs text-gray-400">12</span>
+        </a>
+        <a href="#" class="flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-gray-500">
+          <span>Notes</span>
+        </a>
+      </nav>
+
+    </aside>
+
+    <!-- MAIN -->
+    <main class="flex-1 flex flex-col bg-white">
+
+      <header class="flex items-center justify-between px-6 border-b border-gray-100" style="height:56px;">
+        <h1 class="text-xl font-semibold text-gray-900">Tasks</h1>
+        <div class="flex items-center gap-3">
+          <button class="flex items-center gap-2 text-sm text-gray-500 px-3 py-2 rounded-lg">
+            <span>Filter</span>
+          </button>
+          <button class="flex items-center gap-2 text-sm font-medium text-gray-900 bg-gray-100 px-3 py-2 rounded-xl">
+            <span>Add task</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="flex items-center gap-1 px-6 border-b border-gray-100" style="height:44px;">
+        <button aria-current="page" class="text-sm font-medium text-gray-900 px-3 py-2 rounded-lg">All</button>
+        <button class="text-sm text-gray-400 px-3 py-2 rounded-lg">Today</button>
+        <button class="text-sm text-gray-400 px-3 py-2 rounded-lg">Upcoming</button>
+        <button class="text-sm text-gray-400 px-3 py-2 rounded-lg">Completed</button>
+      </div>
+
+      <div class="flex-1">
+
+        <div class="bg-white border-b border-gray-100 px-6 flex items-center" style="height:36px;">
+          <span class="text-xs font-semibold text-gray-400 uppercase">Overdue</span>
+          <span class="ml-2 text-xs text-gray-300">2</span>
+        </div>
+
+        <div class="flex items-center px-6 border-b border-gray-50" style="height:56px;">
+          <div class="flex items-center justify-center" style="width:44px;height:44px;">
+            <div class="w-5 h-5 rounded-full border-2 border-gray-300 bg-white"></div>
+          </div>
+          <div class="flex-1 ml-1">
+            <div class="text-sm font-medium text-gray-900">Finalize Q4 budget report</div>
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-xs text-gray-400">Work</span>
+              <span class="text-xs font-medium text-gray-500">Due Dec 15</span>
+            </div>
+          </div>
+          <div class="ml-2">
+            <span class="text-xs font-semibold text-gray-500 bg-gray-100 rounded-full px-2 py-1">High</span>
+          </div>
+        </div>
+
+        <div class="flex items-center px-6 border-b border-gray-50" style="height:56px;">
+          <div class="flex items-center justify-center" style="width:44px;height:44px;">
+            <div class="w-5 h-5 rounded-full border-2 border-gray-300 bg-white"></div>
+          </div>
+          <div class="flex-1 ml-1">
+            <div class="text-sm font-medium text-gray-900">Review contractor invoices</div>
+            <div class="flex items-center gap-2 mt-1">
+              <span class="text-xs text-gray-400">Finance</span>
+              <span class="text-xs font-medium text-gray-500">Due Dec 14</span>
+            </div>
+          </div>
+          <div class="ml-2">
+            <span class="text-xs font-semibold text-gray-500 bg-gray-100 rounded-full px-2 py-1">High</span>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- UX Annotations — should be dropped (everything after first h2) -->
+<div class="bg-gray-50 border-t border-gray-200">
+  <div class="max-w-5xl mx-auto px-8 py-12">
+    <h2 class="text-lg font-semibold text-gray-900 mb-6">UX Annotations — Tasks Index</h2>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="rounded-2xl bg-white border border-gray-100 p-5">
+        <div class="text-xs font-semibold text-gray-700">Time-grouped task list</div>
+        <p class="text-sm text-gray-500">Tasks grouped by temporal urgency.</p>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
