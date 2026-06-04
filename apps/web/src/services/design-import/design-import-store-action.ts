@@ -24,6 +24,71 @@ type SetState = (
     | ((s: StoreLike) => Partial<{ document: PenDocument; isDirty: boolean }>),
 ) => void;
 
+// Bake every `ref` node into a deep clone of its component subtree so
+// every label/title/text in the screens becomes an editable Text node
+// in the canvas. Refs themselves stay un-editable in OP's editor; the
+// detach gives the user direct click-to-edit on every instance.
+function detachRefsInDocument(doc: PenDocument): PenDocument {
+  const componentsById = new Map<string, FrameNode>();
+  const indexComponents = (nodes: PenNode[] | undefined): void => {
+    if (!nodes) return;
+    for (const n of nodes) {
+      if (n.type === 'frame' && (n as FrameNode & { reusable?: boolean }).reusable === true) {
+        componentsById.set(n.id, n as FrameNode);
+      }
+      const kids = (n as { children?: PenNode[] }).children;
+      if (kids) indexComponents(kids);
+    }
+  };
+  indexComponents(doc.children);
+  for (const p of doc.pages ?? []) indexComponents(p.children);
+
+  let idCounter = 0;
+  const freshId = (): string => `dt-${Date.now().toString(36)}-${idCounter++}`;
+
+  const deepClone = (node: PenNode): PenNode => {
+    const cloned: PenNode = { ...node, id: freshId() };
+    const kids = (node as { children?: PenNode[] }).children;
+    if (kids) (cloned as { children?: PenNode[] }).children = kids.map(deepClone);
+    return cloned;
+  };
+
+  const detach = (node: PenNode): PenNode => {
+    if (node.type === 'ref') {
+      const refTarget = (node as { ref?: string }).ref;
+      const component = refTarget ? componentsById.get(refTarget) : undefined;
+      if (!component) return { ...node }; // ref points nowhere — leave as-is
+      const cloned = deepClone({ ...component, reusable: undefined } as PenNode) as FrameNode;
+      // Carry the ref's own position/name onto the materialised frame.
+      const refMeta = node as { x?: number; y?: number; name?: string };
+      if (typeof refMeta.x === 'number') (cloned as { x?: number }).x = refMeta.x;
+      if (typeof refMeta.y === 'number') (cloned as { y?: number }).y = refMeta.y;
+      if (refMeta.name) (cloned as { name?: string }).name = refMeta.name;
+      return cloned;
+    }
+    const out: PenNode = { ...node };
+    const kids = (node as { children?: PenNode[] }).children;
+    if (kids) (out as { children?: PenNode[] }).children = kids.map(detach);
+    return out;
+  };
+
+  const next: PenDocument = {
+    ...doc,
+    children: (doc.children ?? []).map(detach),
+  };
+  if (doc.pages) {
+    // Detach refs in every screen page. Drop reusable frames so the
+    // template definitions don't render above the screen content.
+    next.pages = doc.pages.map((p) => ({
+      ...p,
+      children: p.children
+        .filter((n) => !(n.type === 'frame' && (n as FrameNode & { reusable?: boolean }).reusable === true))
+        .map(detach),
+    }));
+  }
+  return next;
+}
+
 /**
  * Insert PenNodes mapped from a {@link DesignImportDocument} into the active
  * page. The whole import is wrapped in a single history batch so undo
@@ -167,11 +232,16 @@ export function importPenDocument(
   // `doc.children.map(...)`; if Mira emitted only `pages` (no top-level
   // `children`), that crashes with "Cannot read properties of undefined
   // (reading 'map')". Pad it so the store gets a stable shape.
+  //
+  // Then DETACH every `ref` so every screen has its own editable copy
+  // of the component — refs make text un-editable in-place, and for
+  // wireframe iteration the user wants click-to-edit on every label.
   const safeDoc: PenDocument = {
     ...doc,
     children: Array.isArray(doc.children) ? doc.children : [],
   };
-  applyExternalDocument(safeDoc);
+  const detached = detachRefsInDocument(safeDoc);
+  applyExternalDocument(detached);
 
   // Report ids visible on the active page so callers can correlate the
   // load with what the user actually sees.
