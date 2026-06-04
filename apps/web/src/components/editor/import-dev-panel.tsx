@@ -78,19 +78,30 @@ export default function ImportDevPanel() {
       }
       let inserted = 0;
       let warnings = 0;
-      parsed.forEach((entry, idx) => {
-        if (entry.kind === 'pen') {
-          // Native PenDocument path — replaces the canvas wholesale via
-          // applyExternalDocument; multi-screen offset doesn't apply.
-          const r = importPenDocument(entry.doc);
-          inserted += r.inserted.length;
-          warnings += r.warnings.length;
-        } else {
-          const offsetDoc = offsetScreen(entry.doc, idx);
-          const r = importDesign(offsetDoc);
-          inserted += r.inserted.length;
-          warnings += r.warnings.length + conversionWarnings.length;
-        }
+      // PenDocument loads replace the canvas — merge ALL screens into a
+      // single document with one page each, then apply once.
+      const penEntries = parsed.filter((e): e is { kind: 'pen'; doc: PenDocument } => e.kind === 'pen');
+      const importEntries = parsed.filter((e): e is { kind: 'import'; doc: DesignImportDocument } => e.kind === 'import');
+      if (penEntries.length > 0) {
+        const merged: PenDocument = {
+          version: penEntries[0].doc.version ?? '1',
+          name: pipeline.name ?? `Pipeline ${id}`,
+          children: [],
+          pages: penEntries.flatMap((e) => {
+            const p = e.doc.pages ?? [];
+            return p.length > 0 ? p : [{ id: e.doc.name ?? 'page', name: e.doc.name ?? 'Page', children: e.doc.children ?? [] }];
+          }),
+          variables: penEntries.reduce<Record<string, unknown>>((acc, e) => ({ ...acc, ...e.doc.variables }), {}) as PenDocument['variables'],
+        };
+        const r = importPenDocument(merged);
+        inserted += r.inserted.length;
+        warnings += r.warnings.length;
+      }
+      importEntries.forEach((entry, idx) => {
+        const offsetDoc = offsetScreen(entry.doc, idx);
+        const r = importDesign(offsetDoc);
+        inserted += r.inserted.length;
+        warnings += r.warnings.length + conversionWarnings.length;
       });
       setStatus(
         `pipeline ${id} → ${parsed.length} screen(s), ${inserted} nodes${warnings ? `, ${warnings} warnings` : ''}`,
