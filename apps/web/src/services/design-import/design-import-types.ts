@@ -8,9 +8,27 @@
  * else maps onto a PenNode the canvas can render.
  */
 
-export type DesignImportType = 'frame' | 'text' | 'rectangle' | 'ellipse' | 'image';
+export type DesignImportType =
+  | 'frame'
+  | 'text'
+  | 'rectangle'
+  | 'ellipse'
+  | 'image'
+  | 'component'
+  | 'instance';
 
 export type DesignImportFlex = 'row' | 'col';
+
+/**
+ * Per-slot override map keyed by slot name (matches a `name` on a child of
+ * the referenced component definition). Only the visual fields commonly
+ * varied between instances are surfaced — `text`, `bg`, `color`.
+ */
+export interface DesignImportInstanceOverride {
+  text?: string;
+  bg?: string;
+  color?: string;
+}
 
 export interface DesignImportNode {
   /** PenNode-compatible kind. */
@@ -52,6 +70,26 @@ export interface DesignImportNode {
   src?: string;
   /** Nested children. */
   children?: DesignImportNode[];
+  /**
+   * Names of the slot children a `component` exposes for override. Each entry
+   * should match the `name` of one of the component's descendant nodes —
+   * those are the slots an `instance` may override via `overrides[<slotName>]`.
+   */
+  slot?: string[];
+  /**
+   * REQUIRED on `instance` nodes — the `name` of the `component` definition
+   * to reference. The mapper resolves this against components discovered in
+   * the same document (component definitions must appear earlier in the tree
+   * walk; only one name key — no `componentId` alias — keeps lookup
+   * unambiguous).
+   */
+  componentName?: string;
+  /**
+   * On `instance` nodes only — per-slot overrides keyed by slot name. The
+   * mapper translates slot names to the matching child node id when emitting
+   * the underlying RefNode's `descendants` map.
+   */
+  overrides?: Record<string, DesignImportInstanceOverride>;
 }
 
 export interface DesignImportDocument {

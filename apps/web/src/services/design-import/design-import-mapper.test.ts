@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { FrameNode, TextNode, RectangleNode } from '@zseven-w/pen-types';
+import type { FrameNode, TextNode, RectangleNode, RefNode } from '@zseven-w/pen-types';
 
 import { mapImportToPenNodes } from './design-import-mapper';
 import type { DesignImportDocument } from './design-import-types';
@@ -250,6 +250,152 @@ describe('mapImportToPenNodes', () => {
       expect((leaf as TextNode).x).toBeUndefined();
       expect((leaf as TextNode).y).toBeUndefined();
     }
+  });
+
+  describe('components + instances', () => {
+    it('hoists a single component definition and emits one RefNode per instance', () => {
+      const doc: DesignImportDocument = {
+        nodes: [
+          {
+            type: 'frame',
+            name: 'Screen',
+            flex: 'col',
+            children: [
+              {
+                type: 'component',
+                name: 'TaskRow',
+                slot: [ 'title' ],
+                w: 240, h: 40,
+                bg: '#ffffff',
+                children: [ { type: 'text', name: 'title', text: 'Placeholder' } ],
+              },
+              { type: 'instance', componentName: 'TaskRow' },
+              { type: 'instance', componentName: 'TaskRow' },
+              { type: 'instance', componentName: 'TaskRow' },
+            ],
+          },
+        ],
+      };
+
+      const { nodes, warnings } = mapImportToPenNodes(doc);
+      expect(warnings).toEqual([]);
+
+      // First node should be the hoisted component definition (a reusable frame).
+      const def = nodes[0] as FrameNode;
+      expect(def.type).toBe('frame');
+      expect(def.reusable).toBe(true);
+      expect(def.name).toBe('TaskRow');
+
+      // Second node is the screen frame whose children contain three RefNodes
+      // (and the in-place component definition is suppressed).
+      const screen = nodes[1] as FrameNode;
+      const refs = (screen.children ?? []).filter((c) => c.type === 'ref') as RefNode[];
+      expect(refs).toHaveLength(3);
+      for (const ref of refs) {
+        expect(ref.ref).toBe(def.id);
+      }
+    });
+
+    it('records a warning and drops the instance when componentName is unknown', () => {
+      const doc: DesignImportDocument = {
+        nodes: [
+          {
+            type: 'frame',
+            name: 'Screen',
+            children: [
+              { type: 'instance', componentName: 'Ghost' },
+            ],
+          },
+        ],
+      };
+
+      const { nodes, warnings } = mapImportToPenNodes(doc);
+      expect(warnings.some((w) => w.includes('Ghost'))).toBe(true);
+      const screen = nodes[0] as FrameNode;
+      expect(screen.children ?? []).toHaveLength(0);
+    });
+
+    it('translates slot-name overrides into RefNode.descendants keyed by child id', () => {
+      const doc: DesignImportDocument = {
+        nodes: [
+          {
+            type: 'component',
+            name: 'TaskRow',
+            slot: [ 'title' ],
+            children: [ { type: 'text', name: 'title', text: 'Placeholder' } ],
+          },
+          {
+            type: 'instance',
+            componentName: 'TaskRow',
+            overrides: { title: { text: 'Hello' } },
+          },
+        ],
+      };
+
+      const { nodes, warnings } = mapImportToPenNodes(doc);
+      expect(warnings).toEqual([]);
+
+      const def = nodes[0] as FrameNode;
+      const titleChild = (def.children ?? [])[0] as TextNode;
+      const ref = nodes[1] as RefNode;
+      expect(ref.type).toBe('ref');
+      expect(ref.descendants).toBeDefined();
+      const patch = ref.descendants![titleChild.id] as Partial<TextNode>;
+      expect(patch.content).toBe('Hello');
+    });
+
+    it('registers a component nested inside a regular frame', () => {
+      const doc: DesignImportDocument = {
+        nodes: [
+          {
+            type: 'frame',
+            name: 'Wrapper',
+            children: [
+              {
+                type: 'component',
+                name: 'Pill',
+                slot: [ 'label' ],
+                children: [ { type: 'text', name: 'label', text: '?' } ],
+              },
+            ],
+          },
+          { type: 'instance', componentName: 'Pill', overrides: { label: { text: 'New' } } },
+        ],
+      };
+
+      const { nodes, warnings } = mapImportToPenNodes(doc);
+      expect(warnings).toEqual([]);
+
+      // First node is the hoisted Pill definition; second is the Wrapper frame
+      // (now empty inside, since the in-place component is suppressed); third
+      // is the RefNode instance.
+      const def = nodes[0] as FrameNode;
+      expect(def.reusable).toBe(true);
+      expect(def.name).toBe('Pill');
+
+      const ref = nodes[2] as RefNode;
+      expect(ref.type).toBe('ref');
+      expect(ref.ref).toBe(def.id);
+    });
+
+    it('warns and keeps the first definition when two components share a name', () => {
+      const doc: DesignImportDocument = {
+        nodes: [
+          { type: 'component', name: 'Dup', children: [ { type: 'text', text: 'first' } ] },
+          { type: 'component', name: 'Dup', children: [ { type: 'text', text: 'second' } ] },
+          { type: 'instance', componentName: 'Dup' },
+        ],
+      };
+
+      const { nodes, warnings } = mapImportToPenNodes(doc);
+      expect(warnings.some((w) => w.toLowerCase().includes('duplicate'))).toBe(true);
+
+      const def = nodes[0] as FrameNode;
+      expect(def.reusable).toBe(true);
+      const firstChild = (def.children ?? [])[0] as TextNode;
+      // The FIRST definition wins; the second's "second" string never appears.
+      expect(firstChild.content).toBe('first');
+    });
   });
 
   it('verticalizes layout-less HTML-converted frames after the import action runs', async () => {

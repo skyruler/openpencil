@@ -6,11 +6,13 @@ import type {
   EllipseNode,
   TextNode,
   ImageNode,
+  RefNode,
 } from '@zseven-w/pen-types';
 import type { PenFill, SolidFill } from '@/types/styles';
 
 import type {
   DesignImportDocument,
+  DesignImportInstanceOverride,
   DesignImportNode,
   DesignImportType,
 } from './design-import-types';
@@ -35,6 +37,9 @@ const KNOWN_KEYS = new Set<keyof DesignImportNode>([
   'flex',
   'src',
   'children',
+  'slot',
+  'componentName',
+  'overrides',
 ]);
 
 const ALLOWED_TYPES = new Set<DesignImportType>([
@@ -43,7 +48,26 @@ const ALLOWED_TYPES = new Set<DesignImportType>([
   'rectangle',
   'ellipse',
   'image',
+  'component',
+  'instance',
 ]);
+
+/**
+ * Registry built in pass-1: maps a component's author-supplied `name` to its
+ * generated FrameNode id and to a {slotName → childId} table so instance
+ * overrides can be translated from slot-name keys (author-friendly) to the
+ * child-id keys PenNode's RefNode.descendants actually consumes.
+ */
+interface ComponentRegistryEntry {
+  /** Generated FrameNode id — used as the RefNode `ref`. */
+  id: string;
+  /** slotName → childId, derived from the component's declared `slot[]`. */
+  slotChildIds: Record<string, string>;
+  /** The emitted FrameNode definition (held so caller can hoist it). */
+  frame: FrameNode;
+}
+
+type ComponentRegistry = Map<string, ComponentRegistryEntry>;
 
 export interface MapResult {
   /** PenNodes produced from the input tree. */
@@ -56,17 +80,141 @@ export interface MapResult {
  * Walk an author-friendly import tree and produce canonical PenNodes ready to
  * be inserted into the document store. Unknown nodes / fields are skipped and
  * surfaced as warnings.
+ *
+ * Two-pass conversion when the tree contains `component` / `instance` nodes:
+ *
+ *   1. Walk the input tree depth-first registering every `component` node
+ *      under its `name`. Each registered component is emitted as a
+ *      `FrameNode { reusable: true, … }` and hoisted to the FRONT of the
+ *      output array so it precedes any instances that reference it. Duplicate
+ *      component names emit a warning and keep the first definition (last-
+ *      writer-wins is more error-prone — Mira can rename to disambiguate).
+ *
+ *   2. The full tree walk substitutes `instance` nodes with `RefNode`s
+ *      pointing at the registered component id, translating slot-name
+ *      overrides into the child-id keyed `descendants` map RefNode expects.
+ *      Instances that reference an unknown `componentName` are dropped with a
+ *      warning so the rest of the screen still imports.
+ *
+ * Components are hoisted (not left in place) so the document tree only walks
+ * past each definition once — instances are pure references and don't carry
+ * any child geometry that would otherwise re-render.
  */
 export function mapImportToPenNodes(doc: DesignImportDocument): MapResult {
   const warnings: string[] = [];
-  const nodes: PenNode[] = [];
+  const registry: ComponentRegistry = new Map();
 
+  // Pass 1 — discover and emit component definitions.
   for (const child of doc.nodes ?? []) {
-    const mapped = mapNode(child, warnings, '$', true);
+    registerComponents(child, warnings, '$', registry);
+  }
+
+  // Pass 2 — walk the input tree converting nodes, with instances resolving
+  // against the registry built in pass 1.
+  const nodes: PenNode[] = [];
+  for (const child of doc.nodes ?? []) {
+    const mapped = mapNode(child, warnings, '$', true, registry);
     if (mapped) nodes.push(mapped);
   }
 
+  // Hoist all component definitions to the front of the output array. The
+  // canvas engine resolves RefNodes by id from anywhere in the tree, but
+  // keeping definitions first keeps the layer panel readable and matches the
+  // convention used elsewhere in pen-core's component utilities.
+  if (registry.size > 0) {
+    const components = Array.from(registry.values()).map((e) => e.frame as PenNode);
+    return { nodes: [ ...components, ...nodes ], warnings };
+  }
+
   return { nodes, warnings };
+}
+
+/**
+ * Pass 1 — recursively find every `{ type: 'component' }` in the input tree,
+ * convert it to a reusable FrameNode, and register it under its author-given
+ * name so pass 2 can resolve instance references. Component children are
+ * mapped through `mapNode` so all the standard frame styling applies (bg,
+ * radius, autolayout, etc.).
+ */
+function registerComponents(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  registry: ComponentRegistry,
+): void {
+  if (!input || typeof input !== 'object') return;
+
+  if (input.type === 'component') {
+    const name = typeof input.name === 'string' ? input.name : '';
+    if (!name) {
+      warnings.push(`${path}: component without "name" — skipped`);
+      return;
+    }
+    if (registry.has(name)) {
+      warnings.push(`${path}: duplicate component name "${name}" — first definition kept`);
+      return;
+    }
+
+    const frame = buildComponentFrame(input, warnings, `${path}.${name}`, registry);
+    const slotChildIds: Record<string, string> = {};
+    for (const slotName of input.slot ?? []) {
+      const match = findChildIdByName(frame.children, slotName);
+      if (match) slotChildIds[slotName] = match;
+    }
+    registry.set(name, { id: frame.id, slotChildIds, frame });
+    return;
+  }
+
+  for (const child of input.children ?? []) {
+    registerComponents(child, warnings, `${path}.${input.name ?? input.type}`, registry);
+  }
+}
+
+/** Build the FrameNode that backs a component definition. */
+function buildComponentFrame(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  registry: ComponentRegistry,
+): FrameNode {
+  const id = generateId();
+  const children: PenNode[] = [];
+  for (const child of input.children ?? []) {
+    // Skip nested `component` declarations — they're handled by pass-1
+    // recursion separately so each component sits as its own top-level
+    // definition rather than nesting under a parent component.
+    if (child?.type === 'component') continue;
+    const mapped = mapNode(child, warnings, path, false, registry);
+    if (mapped) children.push(mapped);
+  }
+
+  const frame: FrameNode = {
+    id,
+    type: 'frame',
+    name: input.name ?? 'Component',
+    reusable: true,
+    width: input.w,
+    height: input.h,
+    children,
+  };
+  if (Array.isArray(input.slot) && input.slot.length > 0) {
+    frame.slot = [ ...input.slot ];
+  }
+  applyContainerStyle(frame, input);
+  applyAutoLayout(frame, input);
+  return frame;
+}
+
+function findChildIdByName(children: PenNode[] | undefined, slotName: string): string | undefined {
+  if (!children) return undefined;
+  for (const child of children) {
+    if (child.name === slotName) return child.id;
+    if ('children' in child && child.children) {
+      const nested = findChildIdByName(child.children, slotName);
+      if (nested) return nested;
+    }
+  }
+  return undefined;
 }
 
 function mapNode(
@@ -74,6 +222,7 @@ function mapNode(
   warnings: string[],
   path: string,
   isRoot: boolean,
+  registry: ComponentRegistry,
 ): PenNode | null {
   if (!input || typeof input !== 'object') {
     warnings.push(`${path}: skipped non-object node`);
@@ -96,15 +245,21 @@ function mapNode(
 
   switch (input.type) {
     case 'frame':
-      return mapFrame(input, warnings, nodePath, isRoot);
+      return mapFrame(input, warnings, nodePath, isRoot, registry);
     case 'rectangle':
-      return mapRectangle(input, warnings, nodePath, isRoot);
+      return mapRectangle(input, warnings, nodePath, isRoot, registry);
     case 'ellipse':
       return mapEllipse(input, warnings, nodePath, isRoot);
     case 'text':
       return mapText(input, warnings, isRoot);
     case 'image':
       return mapImage(input, warnings, nodePath, isRoot);
+    case 'component':
+      // Component definitions are registered + hoisted in pass 1. In pass 2
+      // we skip them in-place so the same frame doesn't render twice.
+      return null;
+    case 'instance':
+      return mapInstance(input, warnings, nodePath, isRoot, registry);
     default: {
       // Exhaustiveness — `type` is constrained but be defensive.
       const exhaustive: never = input.type;
@@ -151,12 +306,13 @@ function mapFrame(
   warnings: string[],
   path: string,
   isRoot: boolean,
+  registry: ComponentRegistry,
 ): FrameNode {
   const id = generateId();
   const children: PenNode[] = [];
 
   for (const child of input.children ?? []) {
-    const mapped = mapNode(child, warnings, path, false);
+    const mapped = mapNode(child, warnings, path, false, registry);
     if (mapped) children.push(mapped);
   }
 
@@ -186,10 +342,11 @@ function mapRectangle(
   warnings: string[],
   path: string,
   isRoot: boolean,
+  registry: ComponentRegistry,
 ): RectangleNode {
   const children: PenNode[] = [];
   for (const child of input.children ?? []) {
-    const mapped = mapNode(child, warnings, path, false);
+    const mapped = mapNode(child, warnings, path, false, registry);
     if (mapped) children.push(mapped);
   }
 
@@ -285,6 +442,90 @@ function mapImage(
   if (typeof input.radius === 'number') node.cornerRadius = input.radius;
 
   return node;
+}
+
+/**
+ * Translate a `{ type: 'instance', componentName: 'X', overrides: {...} }`
+ * import node into a PenNode `RefNode`. Returns null when the referenced
+ * component name is unknown so the caller can skip it without aborting the
+ * rest of the import.
+ */
+function mapInstance(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  isRoot: boolean,
+  registry: ComponentRegistry,
+): RefNode | null {
+  const name = typeof input.componentName === 'string' ? input.componentName : '';
+  if (!name) {
+    warnings.push(`${path}: instance without "componentName" — skipped`);
+    return null;
+  }
+  const entry = registry.get(name);
+  if (!entry) {
+    warnings.push(`${path}: instance references unknown component "${name}" — skipped`);
+    return null;
+  }
+
+  const node: RefNode = {
+    id: generateId(),
+    type: 'ref',
+    name: input.name ?? name,
+    ref: entry.id,
+  };
+  assignPosition(node, input, isRoot);
+
+  const descendants = buildDescendants(input.overrides, entry, warnings, path);
+  if (descendants) node.descendants = descendants;
+
+  return node;
+}
+
+/**
+ * Translate the author's `overrides: { <slotName>: { text, bg, color } }`
+ * shape into RefNode's `descendants: Record<childId, Partial<PenNode>>` map.
+ * Unknown slot names are reported as warnings and skipped so a typo in one
+ * slot doesn't kill the rest of the overrides.
+ */
+function buildDescendants(
+  overrides: Record<string, DesignImportInstanceOverride> | undefined,
+  entry: ComponentRegistryEntry,
+  warnings: string[],
+  path: string,
+): Record<string, Partial<PenNode>> | undefined {
+  if (!overrides) return undefined;
+  const out: Record<string, Partial<PenNode>> = {};
+  let any = false;
+
+  for (const [slotName, override] of Object.entries(overrides)) {
+    const childId = entry.slotChildIds[slotName];
+    if (!childId) {
+      warnings.push(`${path}: override targets unknown slot "${slotName}" — skipped`);
+      continue;
+    }
+    const patch: Partial<PenNode> = {};
+    if (typeof override.text === 'string') {
+      (patch as Partial<TextNode>).content = override.text;
+    }
+    const bg = makeSolidFill(override.bg);
+    if (bg) {
+      (patch as Partial<FrameNode>).fill = [bg];
+    }
+    const color = makeSolidFill(override.color);
+    if (color) {
+      // `color` is the text-fill shorthand on the author side; in PenNode
+      // both frames and text use the `fill` field, so a text override slot
+      // that asks for a new color just becomes a fill on the descendant.
+      (patch as Partial<TextNode>).fill = [color];
+    }
+    if (Object.keys(patch).length > 0) {
+      out[childId] = patch;
+      any = true;
+    }
+  }
+
+  return any ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
