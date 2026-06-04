@@ -70,6 +70,11 @@ interface DocumentStoreState {
   // Component management
   makeReusable: (nodeId: string) => void;
   detachComponent: (nodeId: string) => string | undefined;
+  updateRefDescendant: (
+    refId: string,
+    descendantTargetId: string,
+    patch: Partial<PenNode>,
+  ) => void;
 
   // Variable management
   setVariable: (name: string, definition: VariableDefinition) => void;

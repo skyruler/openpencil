@@ -18,6 +18,7 @@ import {
 } from './skia-interaction';
 import { createDocumentSyncScheduler } from './document-sync-scheduler';
 import { projectTextEditStateToViewport } from './text-edit-overlay';
+import { resolveRefDescendantTarget } from '@zseven-w/pen-core';
 
 export default function SkiaCanvas() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -237,9 +238,28 @@ export default function SkiaCanvas() {
           onBlur={(e) => {
             const newContent = e.target.value;
             if (newContent !== editingText.content) {
-              useDocumentStore
-                .getState()
-                .updateNode(editingText.nodeId, { content: newContent } as Partial<PenNode>);
+              const docStore = useDocumentStore.getState();
+              // If the edited node is a descendant of a ref instance, write
+              // the change into the ref's `descendants` map instead of
+              // mutating the component master (which would change every
+              // instance). resolveRefDescendantTarget returns null for nodes
+              // that live directly in the page tree.
+              const refTarget = resolveRefDescendantTarget(
+                editingText.nodeId,
+                docStore.document,
+              );
+              if (refTarget) {
+                docStore.updateRefDescendant(
+                  refTarget.refId,
+                  refTarget.descendantTargetId,
+                  { content: newContent } as Partial<PenNode>,
+                );
+              } else {
+                docStore.updateNode(
+                  editingText.nodeId,
+                  { content: newContent } as Partial<PenNode>,
+                );
+              }
             }
             setEditingText(null);
           }}

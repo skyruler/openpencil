@@ -1,4 +1,5 @@
-import type { PenDocument, PenNode } from '@/types/pen';
+import type { PenDocument, PenNode, RefNode } from '@/types/pen';
+import { mergeRefDescendantPatch } from '@zseven-w/pen-core';
 
 import { useHistoryStore } from '@/stores/history-store';
 import { useCanvasStore } from '@/stores/canvas-store';
@@ -27,6 +28,11 @@ function _setChildren(doc: PenDocument, children: PenNode[]): PenDocument {
 interface ComponentActions {
   makeReusable: (nodeId: string) => void;
   detachComponent: (nodeId: string) => string | undefined;
+  updateRefDescendant: (
+    refId: string,
+    descendantTargetId: string,
+    patch: Partial<PenNode>,
+  ) => void;
 }
 
 type SetState = {
@@ -140,6 +146,32 @@ export function createComponentActions(
         });
         return detached.id;
       }
+    },
+
+    updateRefDescendant: (refId, descendantTargetId, patch) => {
+      const state = get();
+      const children = _children(state);
+      const refNode = findNodeInTree(children, refId);
+      if (!refNode || refNode.type !== 'ref') return;
+
+      const nextRef = mergeRefDescendantPatch(
+        refNode as RefNode,
+        descendantTargetId,
+        patch,
+      );
+
+      // History push BEFORE mutating (matches mutateWithHistory pattern in
+      // document-store-node-actions.ts).
+      useHistoryStore.getState().pushState(state.document);
+      set((s) => ({
+        document: _setChildren(
+          s.document,
+          updateNodeInTree(_children(s), refId, {
+            descendants: nextRef.descendants,
+          } as Partial<PenNode>),
+        ),
+        isDirty: true,
+      }));
     },
   };
 }

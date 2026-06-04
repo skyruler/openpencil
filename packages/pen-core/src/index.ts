@@ -39,6 +39,11 @@ export {
   resolveNodeForCanvas,
 } from './variables/resolve.js';
 export { replaceVariableRefsInTree } from './variables/replace-refs.js';
+export {
+  type RefDescendantTarget,
+  resolveRefDescendantTarget,
+  mergeRefDescendantPatch,
+} from './variables/resolve-ref-descendant.js';
 
 // Normalization
 export { normalizePenDocument } from './normalize.js';
