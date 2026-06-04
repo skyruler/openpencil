@@ -44,6 +44,11 @@ const config = defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+  server: {
+    // Allow the Rails docker comet container to reach the dev server
+    // via `host.docker.internal` for the /api/codegen/html round-trip.
+    allowedHosts: ['localhost', '127.0.0.1', 'host.docker.internal'],
+  },
   ssr: {
     external: ['@zseven-w/agent-native'],
   },
