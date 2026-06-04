@@ -1,6 +1,5 @@
 import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { useDocumentStore } from '@/stores/document-store';
 import { SAMPLE_TASKS_INDEX } from '@/services/design-import/sample-wireframe';
@@ -87,10 +86,10 @@ export default function ImportDevPanel() {
         <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
           Dev
         </span>
-        <Input
+        <input
           value={pipelineId}
           onChange={(e) => setPipelineId(e.target.value)}
-          className="h-7 w-16 text-xs"
+          className="h-7 w-16 rounded-md border border-border bg-background px-2 text-xs"
           placeholder="id"
         />
         <Tooltip>
