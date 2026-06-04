@@ -162,7 +162,16 @@ export function importPenDocument(
   // Hand the doc to the store — applyExternalDocument runs the standard
   // normalize → migrateToPages → ensureDocumentNodeIds pipeline plus the
   // history-push so this load is undoable.
-  applyExternalDocument(doc);
+  //
+  // pen-core's normalizePenDocument unconditionally calls
+  // `doc.children.map(...)`; if Mira emitted only `pages` (no top-level
+  // `children`), that crashes with "Cannot read properties of undefined
+  // (reading 'map')". Pad it so the store gets a stable shape.
+  const safeDoc: PenDocument = {
+    ...doc,
+    children: Array.isArray(doc.children) ? doc.children : [],
+  };
+  applyExternalDocument(safeDoc);
 
   // Report ids visible on the active page so callers can correlate the
   // load with what the user actually sees.
