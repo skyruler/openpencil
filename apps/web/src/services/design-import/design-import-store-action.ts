@@ -1,4 +1,5 @@
 import type { PenDocument, PenNode, FrameNode } from '@/types/pen';
+import { normalizeTreeLayout } from '@zseven-w/pen-core';
 
 import { useHistoryStore } from '@/stores/history-store';
 import { useCanvasStore } from '@/stores/canvas-store';
@@ -41,6 +42,16 @@ export function importDesign(
 
   if (nodes.length === 0) {
     return { inserted: [], warnings };
+  }
+
+  // Run the autolayout normalizer on each mapped subtree:
+  //   - Infers `layout: 'vertical'` on layout-less frames that hold ≥2
+  //     children (so HTML→JSON output with vanilla `<div>` containers stops
+  //     piling children at (0,0)).
+  //   - Strips stale x/y from children of active-layout frames so
+  //     `computeLayoutPositions` is free to place them via gap + padding.
+  for (const node of nodes) {
+    normalizeTreeLayout(node);
   }
 
   const activePageId = useCanvasStore.getState().activePageId;

@@ -158,4 +158,122 @@ describe('mapImportToPenNodes', () => {
     expect(rect.children).toHaveLength(1);
     expect((rect.children![0] as TextNode).content).toBe('Hello');
   });
+
+  it('omits x/y on nested children when input does not specify them', () => {
+    const doc: DesignImportDocument = {
+      nodes: [
+        {
+          type: 'frame',
+          name: 'Col',
+          flex: 'col',
+          gap: 12,
+          padX: 16,
+          padY: 24,
+          children: [
+            { type: 'text', text: 'A' },
+            { type: 'text', text: 'B' },
+            { type: 'text', text: 'C' },
+          ],
+        },
+      ],
+    };
+
+    const { nodes, warnings } = mapImportToPenNodes(doc);
+    expect(warnings).toEqual([]);
+    const root = nodes[0] as FrameNode;
+    // Root nodes default to (0, 0) so they anchor at the canvas origin.
+    expect(root.x).toBe(0);
+    expect(root.y).toBe(0);
+    expect(root.layout).toBe('vertical');
+    for (const child of root.children!) {
+      // Nested children must NOT carry numeric x/y when input was silent —
+      // otherwise normalizeTreeLayout interprets them as absolute-positioning
+      // hints and refuses to verticalize layout-less parents.
+      expect((child as TextNode).x).toBeUndefined();
+      expect((child as TextNode).y).toBeUndefined();
+    }
+  });
+
+  it('preserves explicit x/y on nested children', () => {
+    const doc: DesignImportDocument = {
+      nodes: [
+        {
+          type: 'frame',
+          name: 'Stage',
+          children: [
+            { type: 'rectangle', name: 'pin', x: 12, y: 34, w: 8, h: 8 },
+          ],
+        },
+      ],
+    };
+    const { nodes } = mapImportToPenNodes(doc);
+    const root = nodes[0] as FrameNode;
+    const pin = root.children![0] as RectangleNode;
+    expect(pin.x).toBe(12);
+    expect(pin.y).toBe(34);
+  });
+
+  it('keeps siblings positionable in a deeply nested autolayout column', () => {
+    const doc: DesignImportDocument = {
+      nodes: [
+        {
+          type: 'frame',
+          name: 'Outer',
+          flex: 'col',
+          gap: 10,
+          padY: 8,
+          children: [
+            {
+              type: 'frame',
+              name: 'Inner',
+              flex: 'col',
+              gap: 4,
+              children: [
+                { type: 'text', text: 'leaf-a' },
+                { type: 'text', text: 'leaf-b' },
+              ],
+            },
+            { type: 'text', text: 'sibling' },
+          ],
+        },
+      ],
+    };
+    const { nodes } = mapImportToPenNodes(doc);
+    const outer = nodes[0] as FrameNode;
+    const inner = outer.children![0] as FrameNode;
+    // Inner frame is NOT the root — its x/y must be absent so autolayout
+    // computes them via the parent's gap + padding (not be stuck at 0,0).
+    expect(inner.x).toBeUndefined();
+    expect(inner.y).toBeUndefined();
+    expect(inner.layout).toBe('vertical');
+    for (const leaf of inner.children!) {
+      expect((leaf as TextNode).x).toBeUndefined();
+      expect((leaf as TextNode).y).toBeUndefined();
+    }
+  });
+
+  it('verticalizes layout-less HTML-converted frames after the import action runs', async () => {
+    // The HTML→JSON converter emits frames without `flex` for vanilla
+    // `<div>` containers. Together with the mapper omitting x/y, the
+    // store-action's normalizeTreeLayout pass must verticalize them so
+    // children don't collapse onto the parent origin.
+    const { htmlToImportJson } = await import('./html-to-import-json');
+    const { normalizeTreeLayout } = await import('@zseven-w/pen-core');
+    // No padding/gap on the outer div — keeps inferLayout() returning
+    // undefined so the ≥2-child vertical fallback fires.
+    const { document } = htmlToImportJson(
+      '<div class="bg-white"><p>one</p><p>two</p><p>three</p></div>',
+    );
+    const { nodes } = mapImportToPenNodes(document);
+    for (const n of nodes) normalizeTreeLayout(n);
+    const root = nodes[0] as FrameNode;
+    expect(root.layout).toBe('vertical');
+    // Children must remain without numeric x/y so computeLayoutPositions can
+    // place them by gap/padding at render time.
+    expect(root.children).toHaveLength(3);
+    for (const child of root.children!) {
+      expect((child as TextNode).x).toBeUndefined();
+      expect((child as TextNode).y).toBeUndefined();
+    }
+  });
 });

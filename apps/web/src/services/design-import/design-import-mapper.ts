@@ -62,7 +62,7 @@ export function mapImportToPenNodes(doc: DesignImportDocument): MapResult {
   const nodes: PenNode[] = [];
 
   for (const child of doc.nodes ?? []) {
-    const mapped = mapNode(child, warnings, '$');
+    const mapped = mapNode(child, warnings, '$', true);
     if (mapped) nodes.push(mapped);
   }
 
@@ -73,6 +73,7 @@ function mapNode(
   input: DesignImportNode,
   warnings: string[],
   path: string,
+  isRoot: boolean,
 ): PenNode | null {
   if (!input || typeof input !== 'object') {
     warnings.push(`${path}: skipped non-object node`);
@@ -95,15 +96,15 @@ function mapNode(
 
   switch (input.type) {
     case 'frame':
-      return mapFrame(input, warnings, nodePath);
+      return mapFrame(input, warnings, nodePath, isRoot);
     case 'rectangle':
-      return mapRectangle(input, warnings, nodePath);
+      return mapRectangle(input, warnings, nodePath, isRoot);
     case 'ellipse':
-      return mapEllipse(input, warnings, nodePath);
+      return mapEllipse(input, warnings, nodePath, isRoot);
     case 'text':
-      return mapText(input, warnings);
+      return mapText(input, warnings, isRoot);
     case 'image':
-      return mapImage(input, warnings, nodePath);
+      return mapImage(input, warnings, nodePath, isRoot);
     default: {
       // Exhaustiveness — `type` is constrained but be defensive.
       const exhaustive: never = input.type;
@@ -113,16 +114,49 @@ function mapNode(
   }
 }
 
+/**
+ * Assign x/y onto an output PenNode following autolayout-friendly rules:
+ *
+ *   - If the input explicitly carries `x` (or `y`), pass it through.
+ *   - Otherwise, leave the field absent when the node is nested inside a
+ *     parent. PenNodeBase makes both fields optional, so absent coordinates
+ *     let the layout engine — and `normalizeTreeLayout`'s "infer vertical
+ *     fallback" heuristic — position children purely from `gap` / `padding`
+ *     instead of being trapped at (0, 0).
+ *   - For root nodes (top of the imported tree) default to 0 so the screen
+ *     lands at the canvas origin rather than floating undefined.
+ *
+ * The previous behavior (`x: input.x ?? 0`) actively broke autolayout: every
+ * child carried a numeric x/y, which `normalizeTreeLayout` interpreted as
+ * "this parent uses absolute positioning, don't verticalize" — leaving
+ * layout-less frames with their children piled at the parent origin.
+ */
+function assignPosition(
+  out: { x?: number; y?: number },
+  input: DesignImportNode,
+  isRoot: boolean,
+): void {
+  if (typeof input.x === 'number') out.x = input.x;
+  else if (isRoot) out.x = 0;
+  if (typeof input.y === 'number') out.y = input.y;
+  else if (isRoot) out.y = 0;
+}
+
 // ---------------------------------------------------------------------------
 // Per-type mappers
 // ---------------------------------------------------------------------------
 
-function mapFrame(input: DesignImportNode, warnings: string[], path: string): FrameNode {
+function mapFrame(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  isRoot: boolean,
+): FrameNode {
   const id = generateId();
   const children: PenNode[] = [];
 
   for (const child of input.children ?? []) {
-    const mapped = mapNode(child, warnings, path);
+    const mapped = mapNode(child, warnings, path, false);
     if (mapped) children.push(mapped);
   }
 
@@ -135,12 +169,11 @@ function mapFrame(input: DesignImportNode, warnings: string[], path: string): Fr
     id,
     type: 'frame',
     name: input.name ?? 'Frame',
-    x: input.x ?? 0,
-    y: input.y ?? 0,
     width: input.w,
     height: input.h,
     children,
   };
+  assignPosition(node, input, isRoot);
 
   applyContainerStyle(node, input);
   applyAutoLayout(node, input);
@@ -148,10 +181,15 @@ function mapFrame(input: DesignImportNode, warnings: string[], path: string): Fr
   return node;
 }
 
-function mapRectangle(input: DesignImportNode, warnings: string[], path: string): RectangleNode {
+function mapRectangle(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  isRoot: boolean,
+): RectangleNode {
   const children: PenNode[] = [];
   for (const child of input.children ?? []) {
-    const mapped = mapNode(child, warnings, path);
+    const mapped = mapNode(child, warnings, path, false);
     if (mapped) children.push(mapped);
   }
 
@@ -163,12 +201,11 @@ function mapRectangle(input: DesignImportNode, warnings: string[], path: string)
     id: generateId(),
     type: 'rectangle',
     name: input.name ?? 'Rectangle',
-    x: input.x ?? 0,
-    y: input.y ?? 0,
     width: input.w,
     height: input.h,
     children: children.length > 0 ? children : undefined,
   };
+  assignPosition(node, input, isRoot);
 
   applyContainerStyle(node, input);
   applyAutoLayout(node, input);
@@ -176,7 +213,12 @@ function mapRectangle(input: DesignImportNode, warnings: string[], path: string)
   return node;
 }
 
-function mapEllipse(input: DesignImportNode, warnings: string[], path: string): EllipseNode {
+function mapEllipse(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  isRoot: boolean,
+): EllipseNode {
   if (input.children && input.children.length > 0) {
     warnings.push(`${path}: ellipse cannot have children — they were dropped`);
   }
@@ -185,11 +227,10 @@ function mapEllipse(input: DesignImportNode, warnings: string[], path: string): 
     id: generateId(),
     type: 'ellipse',
     name: input.name ?? 'Ellipse',
-    x: input.x ?? 0,
-    y: input.y ?? 0,
     width: input.w,
     height: input.h,
   };
+  assignPosition(node, input, isRoot);
 
   if (typeof input.radius === 'number') node.cornerRadius = input.radius;
   const fill = makeSolidFill(input.bg);
@@ -198,7 +239,7 @@ function mapEllipse(input: DesignImportNode, warnings: string[], path: string): 
   return node;
 }
 
-function mapText(input: DesignImportNode, warnings: string[]): TextNode {
+function mapText(input: DesignImportNode, warnings: string[], isRoot: boolean): TextNode {
   const content = typeof input.text === 'string' ? input.text : '';
   if (!content) warnings.push(`text node "${input.name ?? ''}": empty content`);
 
@@ -206,12 +247,11 @@ function mapText(input: DesignImportNode, warnings: string[]): TextNode {
     id: generateId(),
     type: 'text',
     name: input.name ?? 'Text',
-    x: input.x ?? 0,
-    y: input.y ?? 0,
     width: input.w,
     height: input.h,
     content,
   };
+  assignPosition(node, input, isRoot);
 
   if (typeof input.fontSize === 'number') node.fontSize = input.fontSize;
   if (input.fontWeight !== undefined) node.fontWeight = input.fontWeight;
@@ -221,7 +261,12 @@ function mapText(input: DesignImportNode, warnings: string[]): TextNode {
   return node;
 }
 
-function mapImage(input: DesignImportNode, warnings: string[], path: string): ImageNode | null {
+function mapImage(
+  input: DesignImportNode,
+  warnings: string[],
+  path: string,
+  isRoot: boolean,
+): ImageNode | null {
   if (!input.src || typeof input.src !== 'string') {
     warnings.push(`${path}: image without "src" — skipped`);
     return null;
@@ -231,12 +276,11 @@ function mapImage(input: DesignImportNode, warnings: string[], path: string): Im
     id: generateId(),
     type: 'image',
     name: input.name ?? 'Image',
-    x: input.x ?? 0,
-    y: input.y ?? 0,
     width: input.w,
     height: input.h,
     src: input.src,
   };
+  assignPosition(node, input, isRoot);
 
   if (typeof input.radius === 'number') node.cornerRadius = input.radius;
 
