@@ -16,7 +16,10 @@ import { createNodeActions } from './document-store-node-actions';
 import { createComponentActions } from './document-store-component-actions';
 import { createVariableActions } from './document-store-variable-actions';
 import { createPageActions } from './document-store-pages';
-import { importDesign as importDesignAction } from '@/services/design-import/design-import-store-action';
+import {
+  importDesign as importDesignAction,
+  importPenDocument as importPenDocumentAction,
+} from '@/services/design-import/design-import-store-action';
 import type {
   DesignImportDocument,
   DesignImportResult,
@@ -89,6 +92,13 @@ interface DocumentStoreState {
    */
   importDesign: (doc: DesignImportDocument) => DesignImportResult;
 
+  /**
+   * Load a native PenDocument straight onto the canvas via
+   * applyExternalDocument — no mapping, no shape downgrade. Used by Mira's
+   * wireframes pipeline, which now emits PenDocument JSON directly.
+   */
+  importPenDocument: (doc: PenDocument) => DesignImportResult;
+
   applyExternalDocument: (doc: PenDocument) => void;
   applyHistoryState: (doc: PenDocument) => void;
   loadDocument: (
@@ -143,6 +153,13 @@ export const useDocumentStore = create<DocumentStoreState>((set, get) => ({
   // --- Design import (author-friendly JSON → PenNodes) ---
 
   importDesign: (doc) => importDesignAction(set, get, doc),
+
+  importPenDocument: (doc) =>
+    importPenDocumentAction(
+      doc,
+      (next) => get().applyExternalDocument(next),
+      () => get().document,
+    ),
 
   // --- Lifecycle actions (remain inline — small) ---
 

@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 const VITE_CLI = join(import.meta.dirname, '..', '..', 'node_modules', 'vite', 'bin', 'vite.js');
 
-const child = spawn('node', [VITE_CLI, 'dev', '--port', '5173'], {
+const child = spawn('node', [VITE_CLI, 'dev', '--port', '5173', '--host', '0.0.0.0'], {
   cwd: import.meta.dirname,
   stdio: 'inherit',
   env: { ...process.env },

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import handler from '../html.post';
 import type { DesignImportDocument } from '../../../../src/services/design-import/design-import-types';
+import type { PenDocument } from '@zseven-w/pen-types';
 
 const SECRET_ENV = 'OPENPENCIL_CODEGEN_SECRET';
 
@@ -86,9 +87,126 @@ describe('POST /api/codegen/html', () => {
     expect(html).toMatch(/background-color:\s*#ffffff/i);
   });
 
-  it('returns 400 when the body is missing the nodes array', async () => {
-    const res = await callHandler(buildRequest({ name: 'No nodes' }));
+  it('returns 400 when the body has neither PenDocument shape nor a nodes array', async () => {
+    const res = await callHandler(buildRequest({ name: 'Neither' }));
     expect(res.status).toBe(400);
+  });
+
+  it('accepts a native PenDocument with pages and renders it', async () => {
+    const doc: PenDocument = {
+      version: '1',
+      name: 'Tasks Index',
+      children: [],
+      pages: [
+        {
+          id: 'screen-tasks-index',
+          name: 'Screen — Tasks Index',
+          children: [
+            {
+              id: 'n-screen',
+              type: 'frame',
+              name: 'Screen',
+              width: 1280,
+              height: 820,
+              fill: [{ type: 'solid', color: '#fafafa' }],
+              padding: [24, 16],
+              layout: 'vertical',
+              gap: 12,
+              children: [
+                {
+                  id: 'n-heading',
+                  type: 'text',
+                  name: 'Heading',
+                  content: 'Tasks',
+                  fontSize: 24,
+                  fontWeight: 600,
+                  fill: [{ type: 'solid', color: '#111827' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const res = await callHandler(buildRequest(doc));
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toMatch(/<!doctype html>/i);
+    expect(html).toContain('Tasks');
+    expect(html).toContain('Tasks Index');
+  });
+
+  it('accepts a PenDocument that uses top-level children fallback (no pages)', async () => {
+    const doc: PenDocument = {
+      version: '1',
+      name: 'Rootless',
+      children: [
+        {
+          id: 'n-root',
+          type: 'frame',
+          name: 'Root',
+          fill: [{ type: 'solid', color: '#ffffff' }],
+          children: [],
+        },
+      ],
+    };
+    const res = await callHandler(buildRequest(doc));
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toMatch(/background-color:\s*#ffffff/i);
+  });
+
+  it('renders PenDocument ref instances against an in-tree reusable frame', async () => {
+    const doc: PenDocument = {
+      version: '1',
+      name: 'Components',
+      children: [],
+      pages: [
+        {
+          id: 'p1',
+          name: 'Page',
+          children: [
+            {
+              id: 'comp-row',
+              type: 'frame',
+              name: 'TaskRow',
+              reusable: true,
+              slot: ['title'],
+              width: 600,
+              height: 40,
+              fill: [{ type: 'solid', color: '#ffffff' }],
+              children: [
+                {
+                  id: 'comp-row-title',
+                  type: 'text',
+                  name: 'title',
+                  content: '—',
+                  fontSize: 14,
+                  fill: [{ type: 'solid', color: '#111827' }],
+                },
+              ],
+            },
+            {
+              id: 'i-1',
+              type: 'ref',
+              ref: 'comp-row',
+              descendants: { 'comp-row-title': { content: 'Launch post' } as never },
+            },
+            {
+              id: 'i-2',
+              type: 'ref',
+              ref: 'comp-row',
+              descendants: { 'comp-row-title': { content: 'Design review' } as never },
+            },
+          ],
+        },
+      ],
+    };
+    const res = await callHandler(buildRequest(doc));
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Launch post');
+    expect(html).toContain('Design review');
   });
 
   it('returns 400 when the body is malformed JSON', async () => {

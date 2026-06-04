@@ -4,6 +4,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { useDocumentStore } from '@/stores/document-store';
 import { SAMPLE_TASKS_INDEX } from '@/services/design-import/sample-wireframe';
 import { htmlToImportJson } from '@/services/design-import/html-to-import-json';
+import { isPenDocumentShape } from '@/services/design-import/design-import-store-action';
 import {
   fetchArtifactText,
   fetchPipeline,
@@ -11,6 +12,7 @@ import {
   type RailsArtifact,
 } from '@/services/rails-pipeline/rails-pipeline-client';
 import type { DesignImportDocument } from '@/services/design-import/design-import-types';
+import type { PenDocument } from '@/types/pen';
 import { zoomToFitContent } from '@/canvas/skia-engine-ref';
 
 /**
@@ -19,8 +21,13 @@ import { zoomToFitContent } from '@/canvas/skia-engine-ref';
  * (Mira's new JSON output); falls back to wireframes/*.html via the
  * HTML→JSON converter for legacy pipelines.
  */
+type ParsedDoc =
+  | { kind: 'pen'; doc: PenDocument }
+  | { kind: 'import'; doc: DesignImportDocument };
+
 export default function ImportDevPanel() {
   const importDesign = useDocumentStore((s) => s.importDesign);
+  const importPenDocument = useDocumentStore((s) => s.importPenDocument);
   const [pipelineId, setPipelineId] = useState('994');
   const [status, setStatus] = useState<string>('');
   const [running, setRunning] = useState(false);
@@ -46,30 +53,47 @@ export default function ImportDevPanel() {
         setStatus(`pipeline ${id} has no wireframes phase`);
         return;
       }
-      const docs: DesignImportDocument[] = [];
+      const parsed: ParsedDoc[] = [];
       const conversionWarnings: string[] = [];
       const targets = pickArtifacts(wireframes.artifacts);
       for (const artifact of targets) {
         setStatus(`fetching ${artifact.path}…`);
         const text = await fetchArtifactText(artifact.url);
         if (artifact.path.endsWith('.json')) {
-          docs.push(JSON.parse(text) as DesignImportDocument);
+          // Native PenDocument (Mira's new emitter) — detect by shape.
+          // Legacy pipelines still emitting the simplified import shape
+          // (`{ nodes: [...] }`) fall through to the importDesign path so
+          // they keep working until they re-run.
+          const raw = JSON.parse(text) as unknown;
+          if (isPenDocumentShape(raw)) {
+            parsed.push({ kind: 'pen', doc: raw });
+          } else {
+            parsed.push({ kind: 'import', doc: raw as DesignImportDocument });
+          }
         } else {
           const result = htmlToImportJson(text);
-          docs.push(result.document);
+          parsed.push({ kind: 'import', doc: result.document });
           conversionWarnings.push(...result.warnings);
         }
       }
       let inserted = 0;
       let warnings = 0;
-      docs.forEach((doc, idx) => {
-        const offsetDoc = offsetScreen(doc, idx);
-        const r = importDesign(offsetDoc);
-        inserted += r.inserted.length;
-        warnings += r.warnings.length + conversionWarnings.length;
+      parsed.forEach((entry, idx) => {
+        if (entry.kind === 'pen') {
+          // Native PenDocument path — replaces the canvas wholesale via
+          // applyExternalDocument; multi-screen offset doesn't apply.
+          const r = importPenDocument(entry.doc);
+          inserted += r.inserted.length;
+          warnings += r.warnings.length;
+        } else {
+          const offsetDoc = offsetScreen(entry.doc, idx);
+          const r = importDesign(offsetDoc);
+          inserted += r.inserted.length;
+          warnings += r.warnings.length + conversionWarnings.length;
+        }
       });
       setStatus(
-        `pipeline ${id} → ${docs.length} screen(s), ${inserted} nodes${warnings ? `, ${warnings} warnings` : ''}`,
+        `pipeline ${id} → ${parsed.length} screen(s), ${inserted} nodes${warnings ? `, ${warnings} warnings` : ''}`,
       );
       requestAnimationFrame(() => zoomToFitContent());
     } catch (err) {
@@ -78,7 +102,7 @@ export default function ImportDevPanel() {
     } finally {
       setRunning(false);
     }
-  }, [importDesign, pipelineId]);
+  }, [importDesign, importPenDocument, pipelineId]);
 
   return (
     <div className="pointer-events-auto flex flex-col gap-1 rounded-md border border-border bg-card/90 px-2 py-2 shadow-sm backdrop-blur">

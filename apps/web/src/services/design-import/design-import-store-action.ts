@@ -8,6 +8,7 @@ import {
   setActivePageChildren,
   insertNodeInTree,
   findNodeInTree,
+  flattenNodes,
 } from '@/stores/document-tree-utils';
 
 import type { DesignImportDocument, DesignImportResult } from './design-import-types';
@@ -100,4 +101,75 @@ function pickTargetParent(children: PenNode[]): string | null {
   // existing ids when a non-null parent is passed).
   const frame = findNodeInTree(children, only.id) as FrameNode | undefined;
   return frame ? frame.id : null;
+}
+
+// ---------------------------------------------------------------------------
+// Native PenDocument import (no mapping, no information loss).
+//
+// This is the path Mira's wireframes phase uses now: she emits a
+// PenDocument directly and the canvas loads it as-is via
+// `useDocumentStore.applyExternalDocument`. The simplified
+// DesignImportDocument shape is kept only for the SAMPLE_TASKS_INDEX
+// dev-button and any third-party callers that still rely on it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Minimal type-guard for a PenDocument-shaped object. A document is a
+ * PenDocument when it carries `version` AND either a `pages` array or a
+ * `children` array at the top level — matching pen.ts.
+ */
+export function isPenDocumentShape(value: unknown): value is PenDocument {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.version !== 'string') return false;
+  return Array.isArray(candidate.pages) || Array.isArray(candidate.children);
+}
+
+/**
+ * Load a native PenDocument onto the canvas via the document store's
+ * `applyExternalDocument` action. No mapping, no shape downgrade — the
+ * doc lands in the store exactly as authored.
+ *
+ * Returns the ids of every node visible in the resulting active page plus
+ * any warnings raised during minimal pre-flight validation. Warnings are
+ * advisory; the doc is always applied when it parses.
+ *
+ * The caller supplies the `applyExternalDocument` action so this module
+ * stays decoupled from the document-store import (which itself depends
+ * on this file — closing the cycle).
+ */
+export function importPenDocument(
+  doc: PenDocument,
+  applyExternalDocument: (doc: PenDocument) => void,
+  getDocument: () => PenDocument,
+): DesignImportResult {
+  const warnings: string[] = [];
+
+  // Defensive: assert the shape minimally so we don't hand the store an
+  // obviously broken object. Anything thinner than this fails store
+  // invariants downstream.
+  if (!isPenDocumentShape(doc)) {
+    warnings.push('Document does not look like a PenDocument (missing version + pages/children)');
+    return { inserted: [], warnings };
+  }
+
+  const hasPages = Array.isArray(doc.pages) && doc.pages.length > 0;
+  const hasChildren = Array.isArray(doc.children) && doc.children.length > 0;
+  if (!hasPages && !hasChildren) {
+    warnings.push('Document has no pages or top-level children — applying anyway');
+  }
+
+  // Hand the doc to the store — applyExternalDocument runs the standard
+  // normalize → migrateToPages → ensureDocumentNodeIds pipeline plus the
+  // history-push so this load is undoable.
+  applyExternalDocument(doc);
+
+  // Report ids visible on the active page so callers can correlate the
+  // load with what the user actually sees.
+  const next = getDocument();
+  const activePageId = useCanvasStore.getState().activePageId;
+  const children = getActivePageChildren(next, activePageId);
+  const inserted = flattenNodes(children).map((n) => n.id);
+
+  return { inserted, warnings };
 }
