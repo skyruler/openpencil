@@ -1,5 +1,5 @@
 import type { CanvasKit } from 'canvaskit-wasm';
-import type { PenFill, PenStroke } from '@zseven-w/pen-types';
+import type { PenFill, PenStroke, PenStrokeSide } from '@zseven-w/pen-types';
 import { DEFAULT_FILL, DEFAULT_STROKE_WIDTH } from '@zseven-w/pen-core';
 
 export { cssFontFamily } from '@zseven-w/pen-core';
@@ -101,6 +101,43 @@ export function resolveStrokeWidth(stroke?: PenStroke): number {
 
 export function hasVisibleStroke(stroke?: PenStroke): boolean {
   return resolveStrokeWidth(stroke) > 0 && !!resolveStrokeColor(stroke);
+}
+
+/**
+ * Resolve which line segments to draw for a stroke on a rectangular
+ * shape. When `stroke.sides` is missing or lists all four sides, returns
+ * `null` (the caller should draw a full rect/rounded-rect stroke as
+ * usual). When `sides` is a non-empty subset, returns one
+ * `[x1, y1, x2, y2]` segment per requested edge so partial strokes can
+ * be rendered as straight lines at the rect edges — matching Figma's
+ * per-side stroke behavior, where the rounded corner is intentionally
+ * unrendered for the partial sides.
+ *
+ * Pure function with no CanvasKit dependency so the per-side selection
+ * logic can be unit-tested without booting Skia/WASM.
+ */
+export function resolveStrokeSideEdges(
+  stroke: PenStroke | undefined,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): Array<[number, number, number, number]> | null {
+  if (!stroke) return null;
+  const sides = Array.isArray(stroke.sides) ? stroke.sides : undefined;
+  if (!sides || sides.length === 0 || sides.length >= 4) return null;
+
+  const edges: Array<[number, number, number, number]> = [];
+  const pushed = new Set<PenStrokeSide>();
+  for (const side of sides) {
+    if (pushed.has(side)) continue;
+    pushed.add(side);
+    if (side === 'top') edges.push([x, y, x + w, y]);
+    else if (side === 'right') edges.push([x + w, y, x + w, y + h]);
+    else if (side === 'bottom') edges.push([x, y + h, x + w, y + h]);
+    else if (side === 'left') edges.push([x, y, x, y + h]);
+  }
+  return edges.length > 0 ? edges : null;
 }
 
 export function shouldUseTransparentFallbackFill(

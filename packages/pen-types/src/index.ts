@@ -10,6 +10,7 @@ export type {
   ImageFill,
   PenFill,
   PenStroke,
+  PenStrokeSide,
   BlurEffect,
   ShadowEffect,
   PenEffect,
@@ -45,6 +46,7 @@ export type {
   ImageNode,
   IconFontNode,
   RefNode,
+  VariantProperty,
   PenNode,
 } from './pen.js';
 

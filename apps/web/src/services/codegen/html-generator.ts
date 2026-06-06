@@ -6,8 +6,9 @@ import type {
   TextNode,
   ImageNode,
   RefNode,
+  VariantProperty,
 } from '@zseven-w/pen-types';
-import type { PenFill, SolidFill } from '@/types/styles';
+import type { PenFill, PenStroke, SolidFill } from '@/types/styles';
 
 /**
  * Minimal PenNode → HTML generator.
@@ -228,13 +229,56 @@ function renderRef(node: RefNode, registry: ComponentRegistry): string {
     return `<!-- missing component ref ${escapeHtml(node.ref)} -->`;
   }
 
-  // Apply descendants overrides to a structural clone of the target tree so
-  // each instance can carry its own text / fills without mutating the
-  // template definition (subsequent instances would otherwise inherit
-  // earlier overrides).
-  const cloned = cloneWithOverrides(target, node.descendants ?? {}) as FrameNode;
+  // Resolve variant properties: the master's declared `properties` plus the
+  // instance's `variants` selection materialize into a descendants patch map
+  // that's merged with the ref's own `descendants` (per-instance overrides
+  // always win). The result is the only state the wireframe needs to emit
+  // because variants are baked in at codegen time — no runtime switching.
+  const variantOverrides = mergeVariantDescendantsForCodegen(target, node);
+  const cloned = cloneWithOverrides(target, variantOverrides) as FrameNode;
   const overrideName = node.name ?? target.name ?? '';
   return renderContainer(cloned, registry, cloned.children, overrideName);
+}
+
+/**
+ * Resolve a ref's variant selection against its master's `properties` and
+ * fold the resulting patches together with the ref's own `descendants`. The
+ * ref's own descendants always overwrite variant defaults so a designer who
+ * sets, e.g., `descendants["btn-label"].content = "Buy"` still gets that
+ * exact label even when the variant picked a different default.
+ */
+function mergeVariantDescendantsForCodegen(
+  master: FrameNode,
+  refNode: RefNode,
+): Record<string, Partial<PenNode>> {
+  // See pen-renderer/mergeVariantDescendants — TS can't merge two
+  // Partial<PenNode> spreads cleanly across the union, so we accumulate in
+  // an untyped bag and re-tag at the end.
+  const merged: Record<string, Record<string, unknown>> = {};
+  const properties = master.properties;
+  if (properties) {
+    for (const [propKey, prop] of Object.entries(properties)) {
+      const variantProp = prop as VariantProperty;
+      if (variantProp.type === 'text') continue;
+      const selected = refNode.variants?.[propKey];
+      const value: string | boolean =
+        selected !== undefined && selected !== null ? selected : variantProp.default;
+      const descendants = variantProp.descendants;
+      if (!descendants) continue;
+      const key = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+      const patchSet = descendants[key];
+      if (!patchSet) continue;
+      for (const [descId, patch] of Object.entries(patchSet)) {
+        merged[descId] = { ...merged[descId], ...(patch as Record<string, unknown>) };
+      }
+    }
+  }
+  if (refNode.descendants) {
+    for (const [descId, patch] of Object.entries(refNode.descendants)) {
+      merged[descId] = { ...merged[descId], ...(patch as Record<string, unknown>) };
+    }
+  }
+  return merged as Record<string, Partial<PenNode>>;
 }
 
 function cloneWithOverrides(
@@ -263,6 +307,7 @@ function containerClasses(node: FrameNode | RectangleNode): string {
   parts.push(...layoutClasses(node));
   parts.push(...paddingClasses(node.padding));
   parts.push(...gapClasses(node.gap));
+  parts.push(...strokeClasses(node.stroke));
   return parts.filter((s) => s.length > 0).join(' ');
 }
 
@@ -271,7 +316,57 @@ function containerStyle(node: FrameNode | RectangleNode): string {
   styles.push(...sizeStyle(node));
   styles.push(...fillStyle(node.fill));
   styles.push(...radiusStyle(node.cornerRadius));
+  styles.push(...strokeStyle(node.stroke));
   return styles.join('; ');
+}
+
+/**
+ * Emit Tailwind border classes for a stroke. When `sides` is present and
+ * selects a subset of the four edges, emit per-side classes (`border-t`,
+ * `border-r`, `border-b`, `border-l`) — this is the round-trip
+ * representation of Tailwind's right-only divider pattern. Without
+ * `sides` (or with all four), emit the plain `border` class.
+ *
+ * Stroke color is dropped to inline style via `strokeStyle()` since
+ * Tailwind's CDN doesn't ship arbitrary hex utilities.
+ */
+function strokeClasses(stroke: PenStroke | undefined): string[] {
+  if (!stroke) return [];
+  const thickness = typeof stroke.thickness === 'number' ? stroke.thickness : null;
+  if (thickness !== null && thickness <= 0) return [];
+
+  const sides =
+    Array.isArray(stroke.sides) && stroke.sides.length > 0 && stroke.sides.length < 4
+      ? stroke.sides
+      : null;
+
+  const out: string[] = [];
+  if (sides) {
+    for (const side of sides) {
+      if (side === 'top') out.push('border-t');
+      else if (side === 'right') out.push('border-r');
+      else if (side === 'bottom') out.push('border-b');
+      else if (side === 'left') out.push('border-l');
+    }
+  } else {
+    out.push('border');
+  }
+
+  // Stroke thickness — only emit when non-default (1px). Tailwind's
+  // border-[Npx] arbitrary-value class works on both the all-sides and
+  // per-side forms.
+  if (thickness !== null && thickness !== 1) {
+    out.push(`border-[${thickness}px]`);
+  }
+
+  return out;
+}
+
+function strokeStyle(stroke: PenStroke | undefined): string[] {
+  if (!stroke || !Array.isArray(stroke.fill) || stroke.fill.length === 0) return [];
+  const solid = stroke.fill.find((f): f is SolidFill => f.type === 'solid');
+  if (!solid?.color) return [];
+  return [`border-color: ${escapeAttr(solid.color)}`];
 }
 
 function ellipseStyle(node: EllipseNode): string {

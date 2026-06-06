@@ -1,4 +1,29 @@
-import type { PenNode, PenFill, PenStroke, SolidFill } from '@zseven-w/pen-types';
+import type { PenNode, PenFill, PenStroke, PenStrokeSide, SolidFill } from '@zseven-w/pen-types';
+
+const VALID_STROKE_SIDES: readonly PenStrokeSide[] = ['top', 'right', 'bottom', 'left'];
+
+/**
+ * Validate the optional `stroke.sides` field. Drops entries that aren't
+ * one of the four canonical side strings and dedupes the rest. Returns
+ * `undefined` when the input is missing/invalid so the caller can omit
+ * the field entirely (an explicit empty array would mean "all four sides"
+ * — but we treat that the same as omission for simplicity).
+ */
+function normalizeStrokeSides(raw: unknown): PenStrokeSide[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cleaned: PenStrokeSide[] = [];
+  const seen = new Set<PenStrokeSide>();
+
+  for (const entry of raw) {
+    if (typeof entry !== 'string') continue;
+    if (!VALID_STROKE_SIDES.includes(entry as PenStrokeSide)) continue;
+    const side = entry as PenStrokeSide;
+    if (seen.has(side)) continue;
+    seen.add(side);
+    cleaned.push(side);
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
 
 /**
  * Normalize stroke/fill schema violations commonly emitted by AI sub-agents
@@ -98,7 +123,7 @@ function normalizeNodeStroke(node: PenNode): void {
 
   if (looksLikeFillShape) {
     const thickness = readThickness(rec);
-    rec.stroke = {
+    const migrated: PenStroke = {
       thickness,
       fill: [
         {
@@ -106,7 +131,10 @@ function normalizeNodeStroke(node: PenNode): void {
           color: maybeFillShape.color as string,
         } as SolidFill,
       ],
-    } as PenStroke;
+    };
+    const sides = normalizeStrokeSides((stroke as { sides?: unknown }).sides);
+    if (sides) migrated.sides = sides;
+    rec.stroke = migrated;
     delete rec.strokeWidth;
     // Now clean illegal color inside the migrated stroke.fill
     stripIllegalColorsFromStrokeFill(node);
@@ -145,6 +173,12 @@ function normalizeNodeStroke(node: PenNode): void {
     if (inferredColor) {
       strokeObj.fill = [{ type: 'solid', color: inferredColor }] as PenFill[];
     }
+  }
+  const normalizedSides = normalizeStrokeSides(strokeObj.sides);
+  if (normalizedSides) {
+    strokeObj.sides = normalizedSides;
+  } else if ('sides' in strokeObj) {
+    delete (strokeObj as { sides?: unknown }).sides;
   }
   rec.stroke = strokeObj as PenStroke;
   delete rec.strokeWidth;

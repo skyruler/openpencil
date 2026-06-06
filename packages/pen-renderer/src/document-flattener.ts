@@ -1,4 +1,10 @@
-import type { PenNode, ContainerProps, RefNode } from '@zseven-w/pen-types';
+import type {
+  PenNode,
+  ContainerProps,
+  RefNode,
+  FrameNode,
+  VariantProperty,
+} from '@zseven-w/pen-types';
 import {
   resolvePadding,
   isNodeVisible,
@@ -349,23 +355,74 @@ export function resolveRefs(
     const resolved: Record<string, unknown> = { ...component };
     for (const [key, val] of Object.entries(node)) {
       if (key === 'type' || key === 'ref' || key === 'descendants' || key === 'children') continue;
+      if (key === 'variants' || key === 'properties') continue;
       if (val !== undefined) resolved[key] = val;
     }
     resolved.type = component.type;
     if (!resolved.name) resolved.name = component.name;
     delete resolved.reusable;
+    delete resolved.properties;
     const resolvedNode = resolved as unknown as PenNode;
     if ('children' in component && component.children) {
       const refNode = node as RefNode;
+      const mergedOverrides = mergeVariantDescendants(component, refNode);
       (resolvedNode as PenNode & ContainerProps).children = remapIds(
         component.children,
         node.id,
-        refNode.descendants,
+        mergedOverrides,
       );
     }
     visited.delete(node.ref);
     return [resolvedNode];
   });
+}
+
+/**
+ * Combine component-master variant-property descendant patches with the ref's
+ * own `descendants` overrides. Resolution order (earlier entries are clobbered
+ * by later ones for the same descendant id + field):
+ *
+ *   1. For each `properties[key]` on the master, pick the variant value:
+ *      the ref's `variants[key]` if present, otherwise the property's
+ *      `default`. Apply that variant's `descendants[<value>]` patches.
+ *   2. Apply the ref's own `descendants` patches on top (per-instance
+ *      overrides always win).
+ *
+ * Returns the merged overrides map ready to hand to `remapIds`.
+ */
+export function mergeVariantDescendants(
+  master: PenNode,
+  refNode: RefNode,
+): Record<string, Partial<PenNode>> {
+  // Spread merging across the PenNode discriminated union confuses TS — the
+  // result of `{ ...A, ...B }` widens to a synthetic object that no longer
+  // satisfies `Partial<PenNode>`. We accumulate in an untyped bag and cast
+  // back at the end since the keys we touch always live on PenNode.
+  const merged: Record<string, Record<string, unknown>> = {};
+  const properties = (master as FrameNode).properties;
+  if (properties) {
+    for (const [propKey, prop] of Object.entries(properties)) {
+      const variantProp = prop as VariantProperty;
+      if (variantProp.type === 'text') continue;
+      const selected = refNode.variants?.[propKey];
+      const value: string | boolean =
+        selected !== undefined && selected !== null ? selected : variantProp.default;
+      const descendants = variantProp.descendants;
+      if (!descendants) continue;
+      const key = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+      const patchSet = descendants[key];
+      if (!patchSet) continue;
+      for (const [descId, patch] of Object.entries(patchSet)) {
+        merged[descId] = { ...merged[descId], ...(patch as Record<string, unknown>) };
+      }
+    }
+  }
+  if (refNode.descendants) {
+    for (const [descId, patch] of Object.entries(refNode.descendants)) {
+      merged[descId] = { ...merged[descId], ...(patch as Record<string, unknown>) };
+    }
+  }
+  return merged as Record<string, Partial<PenNode>>;
 }
 
 export function remapIds(

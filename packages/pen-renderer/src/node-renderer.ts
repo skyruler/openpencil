@@ -27,6 +27,7 @@ import {
   shouldUseTransparentFallbackFill,
   resolveStrokeColor,
   resolveStrokeWidth,
+  resolveStrokeSideEdges,
 } from './paint-utils.js';
 import { sanitizeSvgPath, hasInvalidNumbers, tryManualPathParse } from './path-utils.js';
 import { SkiaImageLoader } from './image-loader.js';
@@ -641,7 +642,17 @@ export class SkiaNodeRenderer {
 
     const strokePaint = this.makeStrokePaint(stroke, opacity);
     if (strokePaint) {
-      if (hasRoundedCorners) {
+      const sideEdges = resolveStrokeSideEdges(stroke, x, y, w, h);
+      if (sideEdges) {
+        // Partial-side stroke (Figma "border-bottom only" / Tailwind
+        // `border-r`): draw each requested side as a straight line at
+        // the rect edge. Rounded corners are intentionally NOT followed
+        // — the corner stays unrendered for that stroke, matching
+        // Figma's behavior for per-side stroke weights.
+        for (const [x1, y1, x2, y2] of sideEdges) {
+          canvas.drawLine(x1, y1, x2, y2, strokePaint);
+        }
+      } else if (hasRoundedCorners) {
         const maxR = Math.min(w / 2, h / 2);
         canvas.drawRRect(
           ck.RRectXY(ck.LTRBRect(x, y, x + w, y + h), Math.min(cr[0], maxR), Math.min(cr[0], maxR)),

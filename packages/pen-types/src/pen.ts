@@ -77,10 +77,63 @@ export interface ContainerProps {
 
 // --- Concrete Nodes ---
 
+/**
+ * Variant property declaration on a reusable FrameNode (component master).
+ *
+ * Three forms — `variant` for a closed enum of named states, `boolean` for an
+ * on/off toggle, `text` for an instance-supplied string. Each property carries
+ * an optional `descendants` map: `{ <variantValue>: { <descendantId>: Partial<PenNode> } }`
+ * — these patches merge on top of the ref's own `descendants` when the
+ * instance selects that variant value.
+ *
+ * Example (a Button master with Type + Disabled):
+ *
+ *   properties: {
+ *     Type: {
+ *       type: 'variant',
+ *       values: ['Primary', 'Secondary', 'Ghost'],
+ *       default: 'Primary',
+ *       descendants: {
+ *         Primary:   { 'btn-bg': { fill: [{ type: 'solid', color: '#111827' }] } },
+ *         Secondary: { 'btn-bg': { fill: [{ type: 'solid', color: '#f3f4f6' }] } },
+ *         Ghost:     { 'btn-bg': { fill: [] } },
+ *       },
+ *     },
+ *     Disabled: {
+ *       type: 'boolean',
+ *       default: false,
+ *       descendants: { true: { 'btn-bg': { opacity: 0.5 } } },
+ *     },
+ *   }
+ */
+export type VariantProperty =
+  | {
+      type: 'variant';
+      values: string[];
+      default: string;
+      descendants?: Record<string, Record<string, Partial<PenNode>>>;
+    }
+  | {
+      type: 'boolean';
+      default: boolean;
+      descendants?: Record<string, Record<string, Partial<PenNode>>>;
+    }
+  | {
+      type: 'text';
+      default: string;
+    };
+
 export interface FrameNode extends PenNodeBase, ContainerProps {
   type: 'frame';
   reusable?: boolean;
   slot?: string[];
+  /**
+   * Declared variant properties on a component master (only meaningful when
+   * `reusable: true`). Keys are property names ("Type", "Size", "Disabled");
+   * values describe the property type, allowed values, default, and optional
+   * per-variant descendant overrides applied at ref resolution time.
+   */
+  properties?: Record<string, VariantProperty>;
 }
 
 export interface GroupNode extends PenNodeBase, ContainerProps {
@@ -206,6 +259,13 @@ export interface RefNode extends PenNodeBase {
   type: 'ref';
   ref: string;
   descendants?: Record<string, Partial<PenNode>>;
+  /**
+   * Per-instance variant selection. Keys match property names declared on
+   * the component master's `properties` map; values pick a variant (string
+   * for `variant`/`text`, boolean for `boolean`). When omitted or missing
+   * keys, the master's property defaults are used during ref resolution.
+   */
+  variants?: Record<string, string | boolean>;
   children?: PenNode[];
 }
 

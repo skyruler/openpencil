@@ -71,6 +71,26 @@ function normalizeNode(node: PenNode): PenNode {
     delete out.text;
   }
 
+  // frame: validate / drop malformed component variant `properties` map
+  if (out.type === 'frame' && 'properties' in out && out.properties !== undefined) {
+    const cleaned = normalizeVariantProperties(out.properties);
+    if (cleaned === null) {
+      delete out.properties;
+    } else {
+      out.properties = cleaned;
+    }
+  }
+
+  // ref: validate / drop malformed per-instance `variants` selection
+  if (out.type === 'ref' && 'variants' in out && out.variants !== undefined) {
+    const cleaned = normalizeVariantSelection(out.variants);
+    if (cleaned === null) {
+      delete out.variants;
+    } else {
+      out.variants = cleaned;
+    }
+  }
+
   // icon_font: default to lucide family
   if (out.type === 'icon_font' && !out.iconFontFamily) {
     out.iconFontFamily = 'lucide';
@@ -257,6 +277,75 @@ function normalizeSizing(value: unknown): number | string {
   // Try as a plain number string
   const num = parseFloat(value);
   return isNaN(num) ? 0 : num;
+}
+
+// ---------------------------------------------------------------------------
+// Component variants
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate a FrameNode's `properties` map. Keeps entries whose shape matches
+ * one of the three variant property forms; silently drops malformed ones.
+ * Returns `null` when nothing valid remains so the caller can `delete` the
+ * field entirely.
+ */
+function normalizeVariantProperties(raw: unknown): Record<string, unknown> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object') continue;
+    const prop = value as Record<string, unknown>;
+    const t = prop.type;
+    if (t === 'variant') {
+      const values = Array.isArray(prop.values)
+        ? (prop.values.filter((v) => typeof v === 'string') as string[])
+        : [];
+      if (values.length === 0) continue;
+      const def =
+        typeof prop.default === 'string' && values.includes(prop.default)
+          ? prop.default
+          : values[0];
+      const entry: Record<string, unknown> = { type: 'variant', values, default: def };
+      if (prop.descendants && typeof prop.descendants === 'object') {
+        entry.descendants = prop.descendants;
+      }
+      out[key] = entry;
+    } else if (t === 'boolean') {
+      const def = typeof prop.default === 'boolean' ? prop.default : false;
+      const entry: Record<string, unknown> = { type: 'boolean', default: def };
+      if (prop.descendants && typeof prop.descendants === 'object') {
+        entry.descendants = prop.descendants;
+      }
+      out[key] = entry;
+    } else if (t === 'text') {
+      const def = typeof prop.default === 'string' ? prop.default : '';
+      out[key] = { type: 'text', default: def };
+    }
+    // unknown type → drop
+  }
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/**
+ * Validate a RefNode's `variants` selection map. Coerces string-shaped
+ * booleans ("true"/"false") into real booleans; drops non-primitive values.
+ * Returns `null` when nothing valid remains.
+ */
+function normalizeVariantSelection(raw: unknown): Record<string, string | boolean> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const out: Record<string, string | boolean> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'boolean') {
+      out[key] = value;
+    } else if (value === 'true') {
+      out[key] = true;
+    } else if (value === 'false') {
+      out[key] = false;
+    } else if (typeof value === 'string') {
+      out[key] = value;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : null;
 }
 
 function normalizePadding(

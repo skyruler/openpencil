@@ -354,6 +354,88 @@ describe('normalizeStrokeFillSchema — illegal fill color replacement', () => {
   });
 });
 
+describe('normalizeStrokeFillSchema — stroke.sides validation', () => {
+  it('preserves a valid sides array on a frame stroke (sidebar right divider)', () => {
+    const node = frame({
+      stroke: {
+        thickness: 1,
+        sides: ['right'],
+        fill: validFill,
+      },
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as { stroke?: { sides?: string[] } };
+    expect(rec.stroke?.sides).toEqual(['right']);
+  });
+
+  it('dedupes repeated entries in stroke.sides', () => {
+    const node = frame({
+      stroke: {
+        thickness: 1,
+        sides: ['right', 'right', 'top'],
+        fill: validFill,
+      },
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as { stroke?: { sides?: string[] } };
+    expect(rec.stroke?.sides).toEqual(['right', 'top']);
+  });
+
+  it('drops invalid side strings and keeps the valid ones', () => {
+    const node = frame({
+      stroke: {
+        thickness: 1,
+        sides: ['top', 'middle', 'RIGHT', 'bottom', 42],
+        fill: validFill,
+      },
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as { stroke?: { sides?: string[] } };
+    expect(rec.stroke?.sides).toEqual(['top', 'bottom']);
+  });
+
+  it('removes the sides field entirely when every entry is invalid', () => {
+    const node = frame({
+      stroke: {
+        thickness: 1,
+        sides: ['middle', 'diagonal'],
+        fill: validFill,
+      },
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as { stroke?: { sides?: string[] } };
+    expect(rec.stroke?.sides).toBeUndefined();
+  });
+
+  it('removes a non-array sides value', () => {
+    const node = frame({
+      stroke: {
+        thickness: 1,
+        sides: 'right',
+        fill: validFill,
+      },
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as { stroke?: { sides?: unknown } };
+    expect(rec.stroke?.sides).toBeUndefined();
+  });
+
+  it('carries sides through the fill-shaped stroke migration', () => {
+    // The fill-shape recovery branch must also accept and validate sides.
+    const node = frame({
+      stroke: { type: 'solid', color: '#e5e7eb', sides: ['right'] },
+      strokeWidth: 1,
+    });
+    normalizeStrokeFillSchema(node);
+    const rec = node as unknown as {
+      stroke?: { thickness?: number; sides?: string[]; fill?: Array<{ color?: string }> };
+    };
+    expect(rec.stroke?.thickness).toBe(1);
+    expect(rec.stroke?.sides).toEqual(['right']);
+    expect(rec.stroke?.fill?.[0]?.color).toBe('#e5e7eb');
+  });
+});
+
 describe('normalizeStrokeFillSchema — recursion', () => {
   it('recurses into children', () => {
     const inner = ellipse({

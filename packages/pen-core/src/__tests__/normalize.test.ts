@@ -146,4 +146,139 @@ describe('normalizePenDocument', () => {
     expect(node.fill[0].color).toBe('$primary');
     expect(node.opacity).toBe('$opacity');
   });
+
+  // -------------------------------------------------------------------------
+  // Variant properties — declared on reusable component masters
+  // -------------------------------------------------------------------------
+
+  it('keeps a well-formed variant `properties` map on a reusable frame', () => {
+    const doc: PenDocument = {
+      version: '1.0.0',
+      children: [
+        {
+          id: 'comp-btn',
+          type: 'frame',
+          x: 0,
+          y: 0,
+          reusable: true,
+          properties: {
+            Type: {
+              type: 'variant',
+              values: ['Primary', 'Secondary'],
+              default: 'Primary',
+            },
+            Disabled: {
+              type: 'boolean',
+              default: false,
+            },
+          },
+        } as unknown as PenDocument['children'][number],
+      ],
+    };
+
+    const result = normalizePenDocument(doc);
+    const node = result.children[0] as unknown as Record<string, unknown>;
+    const props = node.properties as Record<string, Record<string, unknown>>;
+    expect(props.Type.type).toBe('variant');
+    expect(props.Type.values).toEqual(['Primary', 'Secondary']);
+    expect(props.Type.default).toBe('Primary');
+    expect(props.Disabled.type).toBe('boolean');
+    expect(props.Disabled.default).toBe(false);
+  });
+
+  it('drops malformed variant entries and falls back default to first value', () => {
+    const doc: PenDocument = {
+      version: '1.0.0',
+      children: [
+        {
+          id: 'comp-btn',
+          type: 'frame',
+          x: 0,
+          y: 0,
+          reusable: true,
+          properties: {
+            Type: {
+              type: 'variant',
+              values: ['A', 'B'],
+              default: 'Z', // not in values → coerced to first value
+            },
+            Junk: 'not-an-object',
+            Empty: { type: 'variant', values: [] }, // no values → dropped
+            Boolish: { type: 'boolean' }, // missing default → coerced to false
+          },
+        } as unknown as PenDocument['children'][number],
+      ],
+    };
+
+    const result = normalizePenDocument(doc);
+    const node = result.children[0] as unknown as Record<string, unknown>;
+    const props = node.properties as Record<string, Record<string, unknown>>;
+    expect(props.Type.default).toBe('A');
+    expect(props.Junk).toBeUndefined();
+    expect(props.Empty).toBeUndefined();
+    expect(props.Boolish.default).toBe(false);
+  });
+
+  it('removes `properties` entirely when nothing valid remains', () => {
+    const doc: PenDocument = {
+      version: '1.0.0',
+      children: [
+        {
+          id: 'comp-btn',
+          type: 'frame',
+          x: 0,
+          y: 0,
+          reusable: true,
+          properties: { Bad: { type: 'mystery' } },
+        } as unknown as PenDocument['children'][number],
+      ],
+    };
+
+    const result = normalizePenDocument(doc);
+    const node = result.children[0] as unknown as Record<string, unknown>;
+    expect(node).not.toHaveProperty('properties');
+  });
+
+  it('keeps a well-formed `variants` selection map on a ref', () => {
+    const doc: PenDocument = {
+      version: '1.0.0',
+      children: [
+        {
+          id: 'r1',
+          type: 'ref',
+          x: 0,
+          y: 0,
+          ref: 'comp-btn',
+          variants: { Type: 'Secondary', Disabled: true },
+        } as unknown as PenDocument['children'][number],
+      ],
+    };
+
+    const result = normalizePenDocument(doc);
+    const node = result.children[0] as unknown as Record<string, unknown>;
+    expect(node.variants).toEqual({ Type: 'Secondary', Disabled: true });
+  });
+
+  it('coerces "true"/"false" strings inside `variants` to booleans', () => {
+    const doc: PenDocument = {
+      version: '1.0.0',
+      children: [
+        {
+          id: 'r1',
+          type: 'ref',
+          x: 0,
+          y: 0,
+          ref: 'comp-btn',
+          variants: { Disabled: 'true', On: 'false', BadObj: { junk: 1 } },
+        } as unknown as PenDocument['children'][number],
+      ],
+    };
+
+    const result = normalizePenDocument(doc);
+    const node = result.children[0] as unknown as Record<string, unknown>;
+    const v = node.variants as Record<string, unknown>;
+    expect(v.Disabled).toBe(true);
+    expect(v.On).toBe(false);
+    expect(v.BadObj).toBeUndefined();
+  });
 });

@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import type { PenNode } from '@zseven-w/pen-types';
-import { flattenToRenderNodes } from '../document-flattener';
+import type { PenNode, FrameNode, RefNode } from '@zseven-w/pen-types';
+import {
+  flattenToRenderNodes,
+  mergeVariantDescendants,
+  resolveRefs,
+} from '../document-flattener';
 
 const frame = (props: Partial<PenNode> & { children?: PenNode[] }): PenNode =>
   ({
@@ -304,5 +308,139 @@ describe('flattenToRenderNodes — dimension consistency', () => {
     expect(inner.clipRect!.w).toBe(card.absW);
     expect(inner.clipRect!.h).toBe(card.absH);
     expect(inner.clipRect!.rx).toBe(16);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Variant properties: master `properties` + per-instance `variants` selection
+// ---------------------------------------------------------------------------
+
+function buttonMaster(): FrameNode {
+  return {
+    id: 'comp-btn',
+    type: 'frame',
+    name: 'Button',
+    reusable: true,
+    properties: {
+      Type: {
+        type: 'variant',
+        values: ['Primary', 'Secondary'],
+        default: 'Primary',
+        descendants: {
+          Primary: {
+            'btn-bg': { fill: [{ type: 'solid', color: '#111827' }] },
+          },
+          Secondary: {
+            'btn-bg': { fill: [{ type: 'solid', color: '#f3f4f6' }] },
+          },
+        },
+      },
+      Disabled: {
+        type: 'boolean',
+        default: false,
+        descendants: {
+          true: { 'btn-bg': { opacity: 0.5 } },
+        },
+      },
+    },
+    children: [
+      {
+        id: 'btn-bg',
+        type: 'rectangle',
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 40,
+        fill: [{ type: 'solid', color: '#000000' }],
+      } as PenNode,
+    ],
+  } as FrameNode;
+}
+
+describe('mergeVariantDescendants', () => {
+  it('applies master property defaults when ref has no variants', () => {
+    const master = buttonMaster();
+    const ref: RefNode = { id: 'r1', type: 'ref', ref: 'comp-btn' };
+    const merged = mergeVariantDescendants(master, ref);
+    expect(merged['btn-bg']).toBeDefined();
+    expect((merged['btn-bg'] as any).fill[0].color).toBe('#111827');
+  });
+
+  it('applies the ref-selected variant value', () => {
+    const master = buttonMaster();
+    const ref: RefNode = {
+      id: 'r1',
+      type: 'ref',
+      ref: 'comp-btn',
+      variants: { Type: 'Secondary' },
+    };
+    const merged = mergeVariantDescendants(master, ref);
+    expect((merged['btn-bg'] as any).fill[0].color).toBe('#f3f4f6');
+  });
+
+  it('resolves boolean variants via "true"/"false" descendant keys', () => {
+    const master = buttonMaster();
+    const ref: RefNode = {
+      id: 'r1',
+      type: 'ref',
+      ref: 'comp-btn',
+      variants: { Type: 'Primary', Disabled: true },
+    };
+    const merged = mergeVariantDescendants(master, ref);
+    // Primary descendants merge then Disabled=true overlays opacity 0.5.
+    expect((merged['btn-bg'] as any).fill[0].color).toBe('#111827');
+    expect((merged['btn-bg'] as any).opacity).toBe(0.5);
+  });
+
+  it('ref.descendants overrides variant defaults', () => {
+    const master = buttonMaster();
+    const ref: RefNode = {
+      id: 'r1',
+      type: 'ref',
+      ref: 'comp-btn',
+      variants: { Type: 'Primary' },
+      descendants: {
+        'btn-bg': { fill: [{ type: 'solid', color: '#ff0000' }] },
+      },
+    };
+    const merged = mergeVariantDescendants(master, ref);
+    expect((merged['btn-bg'] as any).fill[0].color).toBe('#ff0000');
+  });
+});
+
+describe('resolveRefs — variant property resolution', () => {
+  it('different refs to the same master render with different fills based on variants', () => {
+    const master = buttonMaster();
+    const refPrimary: PenNode = {
+      id: 'rp',
+      type: 'ref',
+      ref: 'comp-btn',
+      variants: { Type: 'Primary' },
+    } as PenNode;
+    const refSecondary: PenNode = {
+      id: 'rs',
+      type: 'ref',
+      ref: 'comp-btn',
+      variants: { Type: 'Secondary' },
+    } as PenNode;
+    const tree: PenNode[] = [master as PenNode, refPrimary, refSecondary];
+
+    const resolved = resolveRefs(tree, tree);
+
+    // After resolution, indexes 1 and 2 are the materialised refs (master at 0
+    // is still in the tree). Each carries the master's children, remapped with
+    // the variant-selected fills.
+    const primary = resolved.find((n) => n.id === 'rp') as FrameNode;
+    const secondary = resolved.find((n) => n.id === 'rs') as FrameNode;
+    expect(primary).toBeDefined();
+    expect(secondary).toBeDefined();
+
+    const primaryBg = primary.children![0] as any;
+    const secondaryBg = secondary.children![0] as any;
+    expect(primaryBg.fill[0].color).toBe('#111827');
+    expect(secondaryBg.fill[0].color).toBe('#f3f4f6');
+    // ids are remapped per-instance so spatial index doesn't collide
+    expect(primaryBg.id).toBe('rp__btn-bg');
+    expect(secondaryBg.id).toBe('rs__btn-bg');
   });
 });

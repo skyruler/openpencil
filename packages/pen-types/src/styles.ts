@@ -81,6 +81,21 @@ export type PenFill = SolidFill | LinearGradientFill | RadialGradientFill | Imag
 
 // --- Stroke ---
 
+/**
+ * Sides a stroke applies to on a rectangular shape (frame, rectangle, group).
+ *
+ * - Omit (or pass `undefined`/all four) for the standard "stroke on every
+ *   side" behavior.
+ * - Pass a subset (e.g. `['right']` or `['top', 'bottom']`) to draw the
+ *   stroke only on those edges. This is the round-trip representation of
+ *   Tailwind's `border-r` / `border-t border-b` and Figma's per-side
+ *   stroke weights.
+ *
+ * Ignored by non-rectangular nodes (ellipse, path, line, polygon) — those
+ * always stroke the entire shape outline.
+ */
+export type PenStrokeSide = 'top' | 'right' | 'bottom' | 'left';
+
 export interface PenStroke {
   thickness: number | [number, number, number, number];
   align?: 'inside' | 'center' | 'outside';
@@ -89,6 +104,12 @@ export interface PenStroke {
   dashPattern?: number[];
   dashOffset?: number;
   fill?: PenFill[];
+  /**
+   * Optional subset of sides the stroke applies to on rectangular nodes.
+   * Omit or pass all four sides for a full border. Invalid entries are
+   * dropped by `normalizeStrokeFillSchema`.
+   */
+  sides?: PenStrokeSide[];
 }
 
 // --- Effects ---

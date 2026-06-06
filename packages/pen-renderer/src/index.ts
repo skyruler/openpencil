@@ -35,6 +35,7 @@ export {
   flattenToRenderNodes,
   resolveRefs,
   remapIds,
+  mergeVariantDescendants,
   premeasureTextHeights,
   collectReusableIds,
   collectInstanceIds,
@@ -54,6 +55,7 @@ export {
   resolveFillColor,
   resolveStrokeColor,
   resolveStrokeWidth,
+  resolveStrokeSideEdges,
   wrapLine,
   cssFontFamily,
 } from './paint-utils.js';
